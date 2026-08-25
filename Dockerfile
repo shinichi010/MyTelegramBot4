@@ -11,7 +11,7 @@ RUN curl -L -o /usr/local/bin/telegram-bot-api \
     && chmod +x /usr/local/bin/telegram-bot-api
 
 WORKDIR /srv
-
+RUN mkdir -p /srv/tg-api-data
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
