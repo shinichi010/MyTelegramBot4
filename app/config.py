@@ -26,3 +26,18 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # --- أقصى عدد خيارات جودة نعرضها لروابط اكس ---
 MAX_QUALITY_OPTIONS = 5
+
+# --- كوكيز دويين مشفرة base64 (اختياري - تحل مشكلة "Fresh cookies are needed") ---
+DOUYIN_COOKIES_DATA = os.environ.get("DOUYIN_COOKIES_DATA", "")
+DOUYIN_COOKIES_FILE = "/tmp/douyin_cookies.txt"
+
+if DOUYIN_COOKIES_DATA:
+    import base64
+    try:
+        with open(DOUYIN_COOKIES_FILE, "wb") as f:
+            f.write(base64.b64decode(DOUYIN_COOKIES_DATA))
+    except Exception as e:
+        print(f"⚠️ فشل دويين: {e}")
+        DOUYIN_COOKIES_FILE = None
+else:
+    DOUYIN_COOKIES_FILE = None
