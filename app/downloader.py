@@ -108,6 +108,8 @@ async def download_douyin(url: str) -> list[str]:
             "merge_output_format": "mp4",
             "writethumbnail": False,
         })
+        if config.DOUYIN_COOKIES_FILE:
+            opts["cookiefile"] = config.DOUYIN_COOKIES_FILE
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             files = []
