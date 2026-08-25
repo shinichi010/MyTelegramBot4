@@ -27,6 +27,9 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # --- أقصى عدد خيارات جودة نعرضها لروابط اكس ---
 MAX_QUALITY_OPTIONS = 5
 
+# --- آيدي التليگرام الرقمي حقك، يوصلك عليه إشعار كل مستخدم جديد يستخدم البوت ---
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "")
+
 # --- كوكيز دويين مشفرة base64 (اختياري - تحل مشكلة "Fresh cookies are needed") ---
 DOUYIN_COOKIES_DATA = os.environ.get("DOUYIN_COOKIES_DATA", "")
 DOUYIN_COOKIES_FILE = "/tmp/douyin_cookies.txt"
