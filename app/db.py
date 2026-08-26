@@ -65,6 +65,7 @@ def init():
     _db.links.create_index([("created_at", ASCENDING)])
     _db.banned_users.create_index("user_id", unique=True)
     _db.disabled_platforms.create_index("platform", unique=True)
+    _db.stickers.create_index("key", unique=True)
 
     # نزرع الرسائل الافتراضية اذا مو موجودة
     for key, text in DEFAULT_MESSAGES.items():
@@ -103,6 +104,26 @@ def set_message(key: str, text: str) -> bool:
 
 def all_message_keys() -> list[str]:
     return list(DEFAULT_MESSAGES.keys())
+
+
+# ---------- الستيكرات (رفع/خطأ لكل منصة) ----------
+
+STICKER_KEYS = ["upload_x", "error_x", "upload_douyin", "error_douyin"]
+
+
+def get_sticker(key: str) -> str | None:
+    """يرجع file_id للستيكر المحدد، او None اذا مو محدد."""
+    if not is_connected():
+        return None
+    doc = _db.stickers.find_one({"key": key})
+    return doc.get("file_id") if doc else None
+
+
+def set_sticker(key: str, file_id: str) -> bool:
+    if not is_connected():
+        return False
+    _db.stickers.update_one({"key": key}, {"$set": {"file_id": file_id}}, upsert=True)
+    return True
 
 
 # ---------- المستخدمين ----------
