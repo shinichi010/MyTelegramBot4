@@ -16,6 +16,42 @@ logger = logging.getLogger("bot")
 # تخزين مؤقت بالذاكرة: id قصير -> الرابط (لأن callback_data محدود بـ 64 بايت)
 PENDING: dict[str, str] = {}
 
+# ==================== نظام الطابور للتحميلات الثقيلة ====================
+# لما يصير تحميل "ثقيل" (اكبر من HEAVY_FILE_THRESHOLD_MB)، أي طلب جديد
+# ينتظر دوره بدل ما يشتغل بالتوازي ويزنق موارد السيرفر المحدودة.
+import asyncio
+
+_heavy_lock = asyncio.Lock()
+_queue_waiters: list[uuid.UUID] = []  # ترتيب الدخول للطابور
+
+
+async def _acquire_heavy_slot(update, context, chat_id: int):
+    """ينتظر دوره اذا اكو تحميل ثقيل شغال، ويرسل رسالة الانتظار مع رقم الدور."""
+    if not _heavy_lock.locked():
+        await _heavy_lock.acquire()
+        return
+
+    token = uuid.uuid4()
+    _queue_waiters.append(token)
+    position = len(_queue_waiters)
+    wait_msg = await context.bot.send_message(
+        chat_id, db.get_message("queue_wait", position=position)
+    )
+
+    await _heavy_lock.acquire()
+    if token in _queue_waiters:
+        _queue_waiters.remove(token)
+
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
+
+
+def _release_heavy_slot():
+    if _heavy_lock.locked():
+        _heavy_lock.release()
+
 # مفاتيح رسائل قابلة للتعديل، لعرضها بلوحة تحكم الأدمن مع أسماء مفهومة
 EDITABLE_MESSAGES = {
     "welcome": "رسالة البداية (/start)",
@@ -35,6 +71,16 @@ EDITABLE_MESSAGES = {
 
 # محادثة تعديل رسالة (أدمن فقط): user_id -> key الرسالة اللي ينتظر نصها الجديد
 AWAITING_MESSAGE_EDIT: dict[int, str] = {}
+
+# محادثة تعديل ستيكر (أدمن فقط): user_id -> key الستيكر اللي ينتظر يرسله
+AWAITING_STICKER_EDIT: dict[int, str] = {}
+
+STICKER_LABELS = {
+    "upload_x": "ستيكر الرفع - X",
+    "error_x": "ستيكر الخطأ - X",
+    "upload_douyin": "ستيكر الرفع - دويين",
+    "error_douyin": "ستيكر الخطأ - دويين",
+}
 
 
 def _is_admin(user_id: int) -> bool:
@@ -86,6 +132,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     buttons = [
         [InlineKeyboardButton("✏️ تعديل الرسائل", callback_data="adm:msgs")],
+        [InlineKeyboardButton("🖼️ تعديل الستيكرات", callback_data="adm:stickers")],
         [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
         [InlineKeyboardButton("📄 سجل الروابط", callback_data="adm:links")],
         [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
@@ -124,6 +171,26 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"`{current}`\n\n"
             "ارسل النص الجديد هسه كرسالة عادية (تكدر تستخدم `{error}` او `{max_size}` "
             "او `{position}` حسب نوع الرسالة، خلهم كما هم لو ما تعرف وين تنحط).",
+            parse_mode="Markdown",
+        )
+
+    elif data == "adm:stickers":
+        buttons = []
+        for key, label in STICKER_LABELS.items():
+            state = "✅" if db.get_sticker(key) else "❌"
+            buttons.append([InlineKeyboardButton(
+                f"{state} {label}", callback_data=f"adm:sticker:{key}"
+            )])
+        buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")])
+        await query.edit_message_text(
+            "اختار الستيكر اللي تريد تحدده 👇", reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    elif data.startswith("adm:sticker:"):
+        key = data.split(":", 2)[2]
+        AWAITING_STICKER_EDIT[query.from_user.id] = key
+        await query.edit_message_text(
+            f"📤 ارسل الستيكر اللي تريده لـ *{STICKER_LABELS.get(key, key)}* هسه.",
             parse_mode="Markdown",
         )
 
@@ -185,6 +252,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "adm:back":
         buttons = [
             [InlineKeyboardButton("✏️ تعديل الرسائل", callback_data="adm:msgs")],
+            [InlineKeyboardButton("🖼️ تعديل الستيكرات", callback_data="adm:stickers")],
             [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
             [InlineKeyboardButton("📄 سجل الروابط", callback_data="adm:links")],
             [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
@@ -233,6 +301,17 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     db.unban_user(target_id)
     await update.message.reply_text(f"تم إلغاء حظر المستخدم {target_id} ✅")
+
+
+async def handle_admin_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not _is_admin(user.id) or user.id not in AWAITING_STICKER_EDIT:
+        return
+
+    key = AWAITING_STICKER_EDIT.pop(user.id)
+    file_id = update.message.sticker.file_id
+    db.set_sticker(key, file_id)
+    await update.message.reply_text(f"✅ تحدد ستيكر: {STICKER_LABELS.get(key, key)}")
 
 
 # ==================== الرسائل العادية ====================
@@ -300,6 +379,45 @@ def _check_size_ok(files: list[str]) -> bool:
     return total <= config.MAX_FILE_SIZE_BYTES
 
 
+def _total_size(files: list[str]) -> int:
+    import os
+    return sum(os.path.getsize(f) for f in files if os.path.exists(f))
+
+
+async def _show_upload_sticker(context: ContextTypes.DEFAULT_TYPE, chat_id: int, platform: str):
+    """يرسل ستيكر 'جاري الرفع' الخاص بالمنصة اذا محدد، يرجع رسالة الستيكر (لحذفها لاحقاً) او None."""
+    file_id = db.get_sticker(f"upload_{platform}")
+    if not file_id:
+        return None
+    try:
+        return await context.bot.send_sticker(chat_id, file_id)
+    except Exception:
+        logger.exception("failed to send upload sticker")
+        return None
+
+
+async def _resolve_upload_sticker_success(sticker_msg):
+    if sticker_msg:
+        try:
+            await sticker_msg.delete()
+        except Exception:
+            pass
+
+
+async def _resolve_upload_sticker_error(context: ContextTypes.DEFAULT_TYPE, chat_id: int, platform: str, sticker_msg):
+    if sticker_msg:
+        try:
+            await sticker_msg.delete()
+        except Exception:
+            pass
+    error_sticker = db.get_sticker(f"error_{platform}")
+    if error_sticker:
+        try:
+            await context.bot.send_sticker(chat_id, error_sticker)
+        except Exception:
+            logger.exception("failed to send error sticker")
+
+
 async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     msg = await update.message.reply_text(db.get_message("fetching_qualities"))
     try:
@@ -327,10 +445,12 @@ async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
 
 
 async def _handle_douyin(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    chat_id = update.effective_chat.id
     msg = await update.message.reply_text(db.get_message("downloading_douyin"))
-    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.UPLOAD_VIDEO)
+    await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
 
     files = []
+    took_heavy_slot = False
     try:
         files, meta = await downloader.download_douyin(url)
         if not files:
@@ -341,18 +461,34 @@ async def _handle_douyin(update: Update, context: ContextTypes.DEFAULT_TYPE, url
             await msg.edit_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
             return
 
-        await msg.delete()
-        for path in files:
-            await _send_file(update, context, path)
+        if _total_size(files) >= config.HEAVY_FILE_THRESHOLD_BYTES:
+            await _acquire_heavy_slot(update, context, chat_id)
+            took_heavy_slot = True
 
-        await update.message.reply_text(
-            _build_info_caption(meta, len(files)), parse_mode="Markdown"
+        await msg.delete()
+
+        sticker_msg = await _show_upload_sticker(context, chat_id, "douyin")
+        try:
+            for path in files:
+                await _send_file(update, context, path)
+        except Exception:
+            await _resolve_upload_sticker_error(context, chat_id, "douyin", sticker_msg)
+            raise
+        await _resolve_upload_sticker_success(sticker_msg)
+
+        await context.bot.send_message(
+            chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
         )
     except Exception as e:
         logger.exception("douyin download failed")
-        await msg.edit_text(db.get_message("download_error", error=str(e)))
+        try:
+            await msg.edit_text(db.get_message("download_error", error=str(e)))
+        except Exception:
+            await context.bot.send_message(chat_id, db.get_message("download_error", error=str(e)))
     finally:
         downloader.cleanup(files)
+        if took_heavy_slot:
+            _release_heavy_slot()
 
 
 async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -374,7 +510,9 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(db.get_message("downloading"))
     await context.bot.send_chat_action(query.message.chat_id, ChatAction.UPLOAD_VIDEO)
 
+    chat_id = query.message.chat_id
     files = []
+    took_heavy_slot = False
     try:
         files, meta = await downloader.download_x(url, height)
 
@@ -382,20 +520,34 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
             return
 
+        if _total_size(files) >= config.HEAVY_FILE_THRESHOLD_BYTES:
+            await _acquire_heavy_slot(update, context, chat_id)
+            took_heavy_slot = True
+
         await query.message.delete()
-        for path in files:
-            await _send_file(update, context, path, chat_id=query.message.chat_id)
+
+        sticker_msg = await _show_upload_sticker(context, chat_id, "x")
+        try:
+            for path in files:
+                await _send_file(update, context, path, chat_id=chat_id)
+        except Exception:
+            await _resolve_upload_sticker_error(context, chat_id, "x", sticker_msg)
+            raise
+        await _resolve_upload_sticker_success(sticker_msg)
 
         await context.bot.send_message(
-            query.message.chat_id,
-            _build_info_caption(meta, len(files)),
-            parse_mode="Markdown",
+            chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
         )
     except Exception as e:
         logger.exception("x download failed")
-        await query.edit_message_text(db.get_message("download_error", error=str(e)))
+        try:
+            await query.edit_message_text(db.get_message("download_error", error=str(e)))
+        except Exception:
+            await context.bot.send_message(chat_id, db.get_message("download_error", error=str(e)))
     finally:
         downloader.cleanup(files)
+        if took_heavy_slot:
+            _release_heavy_slot()
 
 
 async def _send_file(update, context, path: str, chat_id=None):
@@ -425,6 +577,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("unban", unban_command))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^adm:"))
     app.add_handler(CallbackQueryHandler(handle_quality_choice, pattern=r"^dl:"))
+    app.add_handler(MessageHandler(filters.Sticker.ALL, handle_admin_sticker))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     return app
