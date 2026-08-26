@@ -30,6 +30,18 @@ MAX_QUALITY_OPTIONS = 5
 # --- آيدي التليگرام الرقمي حقك، يوصلك عليه إشعار كل مستخدم جديد يستخدم البوت ---
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "")
 
+# --- رابط اتصال MongoDB (يحفظ فقط بيانات نصية: مستخدمين، رسائل، روابط، حظر - ابداً ملفات) ---
+MONGO_URI = os.environ.get("MONGO_URI", "")
+MONGO_DB_NAME = os.environ.get("MONGO_DB_NAME", "x_douyin_bot")
+
+# --- أقصى حجم ملف مسموح تحميله (ميكابايت) ---
+MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "250"))
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
+# --- الحجم اللي فوقه يعتبر تحميل "ثقيل" ويفعل نظام الطابور (ميكابايت) ---
+HEAVY_FILE_THRESHOLD_MB = int(os.environ.get("HEAVY_FILE_THRESHOLD_MB", "150"))
+HEAVY_FILE_THRESHOLD_BYTES = HEAVY_FILE_THRESHOLD_MB * 1024 * 1024
+
 # --- كوكيز دويين مشفرة base64 (اختياري - تحل مشكلة "Fresh cookies are needed") ---
 DOUYIN_COOKIES_DATA = os.environ.get("DOUYIN_COOKIES_DATA", "")
 DOUYIN_COOKIES_FILE = "/tmp/douyin_cookies.txt"
