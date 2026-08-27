@@ -42,6 +42,12 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 HEAVY_FILE_THRESHOLD_MB = int(os.environ.get("HEAVY_FILE_THRESHOLD_MB", "150"))
 HEAVY_FILE_THRESHOLD_BYTES = HEAVY_FILE_THRESHOLD_MB * 1024 * 1024
 
+# --- مفتاح TikHub API (اختياري - يفعل تحميل ويشات وعرض استهلاك الطلبات بالإحصائيات) ---
+TIKHUB_API_KEY = os.environ.get("TIKHUB_API_KEY", "")
+
+# --- رابط لوحة Render (لعرضه بالإحصائيات، لأن استهلاك RAM/المساحة ما يوصل له البوت برمجياً) ---
+RENDER_DASHBOARD_URL = os.environ.get("RENDER_DASHBOARD_URL", "")
+
 # --- كوكيز دويين مشفرة base64 (اختياري - تحل مشكلة "Fresh cookies are needed") ---
 DOUYIN_COOKIES_DATA = os.environ.get("DOUYIN_COOKIES_DATA", "")
 DOUYIN_COOKIES_FILE = "/tmp/douyin_cookies.txt"
