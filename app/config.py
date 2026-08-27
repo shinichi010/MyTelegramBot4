@@ -45,6 +45,9 @@ HEAVY_FILE_THRESHOLD_BYTES = HEAVY_FILE_THRESHOLD_MB * 1024 * 1024
 # --- مفتاح TikHub API (اختياري - يفعل تحميل ويشات وعرض استهلاك الطلبات بالإحصائيات) ---
 TIKHUB_API_KEY = os.environ.get("TIKHUB_API_KEY", "")
 
+# --- رابط خدمة فك تشفير فيديوهات ويشات (خدمة Render ثانية منفصلة، Docker image جاهز) ---
+WECHAT_DECRYPT_API_URL = os.environ.get("WECHAT_DECRYPT_API_URL", "")
+
 # --- رابط لوحة Render (لعرضه بالإحصائيات، لأن استهلاك RAM/المساحة ما يوصل له البوت برمجياً) ---
 RENDER_DASHBOARD_URL = os.environ.get("RENDER_DASHBOARD_URL", "")
 
@@ -58,7 +61,7 @@ if DOUYIN_COOKIES_DATA:
         with open(DOUYIN_COOKIES_FILE, "wb") as f:
             f.write(base64.b64decode(DOUYIN_COOKIES_DATA))
     except Exception as e:
-        print(f"⚠️ فشل دويين: {e}")
+        print(f"⚠️ فشل فك تشفير كوكيز دويين: {e}")
         DOUYIN_COOKIES_FILE = None
 else:
     DOUYIN_COOKIES_FILE = None
