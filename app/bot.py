@@ -8,7 +8,7 @@ from telegram.ext import (
     MessageHandler, CallbackQueryHandler, ContextTypes, filters,
 )
 
-from . import config, downloader, db, tikhub
+from . import config, downloader, db, tikhub, wechat
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
@@ -80,7 +80,15 @@ STICKER_LABELS = {
     "error_x": "ستيكر الخطأ - X",
     "upload_douyin": "ستيكر الرفع - دويين",
     "error_douyin": "ستيكر الخطأ - دويين",
+    "upload_wechat": "ستيكر الرفع - ويشات",
+    "error_wechat": "ستيكر الخطأ - ويشات",
 }
+
+PLATFORM_LABELS = (
+    ("x", "X (تويتر)"),
+    ("douyin", "دويين"),
+    ("wechat", "ويشات"),
+)
 
 
 def _is_admin(user_id: int) -> bool:
@@ -275,7 +283,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "adm:platforms":
         buttons = []
-        for platform, label in (("x", "X (تويتر)"), ("douyin", "دويين")):
+        for platform, label in PLATFORM_LABELS:
             state = "🔴 موقوفة" if db.is_platform_disabled(platform) else "🟢 شغالة"
             action = "enable" if db.is_platform_disabled(platform) else "disable"
             buttons.append([InlineKeyboardButton(
@@ -316,7 +324,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_callback_refresh_platforms(query):
     buttons = []
-    for platform, label in (("x", "X (تويتر)"), ("douyin", "دويين")):
+    for platform, label in PLATFORM_LABELS:
         state = "🔴 موقوفة" if db.is_platform_disabled(platform) else "🟢 شغالة"
         action = "enable" if db.is_platform_disabled(platform) else "disable"
         buttons.append([InlineKeyboardButton(
@@ -387,6 +395,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = update.message.text or ""
+
+    # ويشات (视频号) - يتحقق أول لأنه ما يمر عبر downloader.detect_platform العادي
+    if wechat.detect(text):
+        if db.is_platform_disabled("wechat"):
+            await update.message.reply_text(db.get_message("platform_disabled"))
+            return
+        if not wechat.is_configured():
+            await update.message.reply_text("تحميل ويشات مو مفعّل حالياً 🙏")
+            return
+        wx_url = wechat.extract_url(text)
+        if not _is_admin(user.id):
+            db.log_link(user.id, user.username or "", "wechat", wx_url)
+        await _handle_wechat(update, context, wx_url)
+        return
+
     platform = downloader.detect_platform(text)
 
     if not platform:
@@ -534,6 +557,51 @@ async def _handle_douyin(update: Update, context: ContextTypes.DEFAULT_TYPE, url
         )
     except Exception as e:
         logger.exception("douyin download failed")
+        try:
+            await msg.edit_text(db.get_message("download_error", error=str(e)))
+        except Exception:
+            await context.bot.send_message(chat_id, db.get_message("download_error", error=str(e)))
+    finally:
+        downloader.cleanup(files)
+        if took_heavy_slot:
+            _release_heavy_slot()
+
+
+async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    chat_id = update.effective_chat.id
+    msg = await update.message.reply_text("⬇️ جاري التحميل من ويشات...")
+    await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
+
+    files = []
+    took_heavy_slot = False
+    try:
+        path, meta = await asyncio.to_thread(wechat.download_and_decrypt, url)
+        files = [path]
+
+        if not _check_size_ok(files):
+            await msg.edit_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
+            return
+
+        if _total_size(files) >= config.HEAVY_FILE_THRESHOLD_BYTES:
+            await _acquire_heavy_slot(update, context, chat_id)
+            took_heavy_slot = True
+
+        await msg.delete()
+
+        sticker_msg = await _show_upload_sticker(context, chat_id, "wechat")
+        try:
+            for path in files:
+                await _send_file(update, context, path)
+        except Exception:
+            await _resolve_upload_sticker_error(context, chat_id, "wechat", sticker_msg)
+            raise
+        await _resolve_upload_sticker_success(sticker_msg)
+
+        await context.bot.send_message(
+            chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.exception("wechat download failed")
         try:
             await msg.edit_text(db.get_message("download_error", error=str(e)))
         except Exception:
