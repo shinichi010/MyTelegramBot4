@@ -37,6 +37,15 @@ def _ping_loop():
             logger.info("keep-alive ping sent")
         except Exception as e:
             logger.warning(f"keep-alive ping failed: {e}")
+
+        # نصحّي بعد خدمة فك تشفير ويشات (اذا مفعّلة) بنفس الدورة
+        if config.WECHAT_DECRYPT_API_URL:
+            try:
+                requests.get(config.WECHAT_DECRYPT_API_URL, timeout=15)
+                logger.info("wechat-decrypt-api keep-alive ping sent")
+            except Exception as e:
+                logger.warning(f"wechat-decrypt-api keep-alive ping failed: {e}")
+
         time.sleep(config.PING_INTERVAL)
 
 
