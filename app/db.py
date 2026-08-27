@@ -126,6 +126,13 @@ def set_sticker(key: str, file_id: str) -> bool:
     return True
 
 
+def remove_sticker(key: str) -> bool:
+    if not is_connected():
+        return False
+    _db.stickers.delete_one({"key": key})
+    return True
+
+
 # ---------- المستخدمين ----------
 
 def upsert_user(user_id: int, username: str, full_name: str) -> bool:
@@ -241,3 +248,24 @@ def get_stats() -> dict:
         "links": count_links(),
         "banned": _db.banned_users.count_documents({}) if is_connected() else 0,
     }
+
+
+def get_storage_stats() -> dict | None:
+    """يجيب حجم استهلاك MongoDB الفعلي من القاعدة نفسها (بالميكابايت)، من اصل 512 ميكا بالخطة المجانية."""
+    if not is_connected():
+        return None
+    try:
+        stats = _db.command("dbStats")
+        used_mb = stats.get("dataSize", 0) / (1024 * 1024)
+        storage_mb = stats.get("storageSize", 0) / (1024 * 1024)
+        index_mb = stats.get("indexSize", 0) / (1024 * 1024)
+        total_mb = storage_mb + index_mb
+        return {
+            "data_mb": round(used_mb, 2),
+            "total_mb": round(total_mb, 2),
+            "free_tier_limit_mb": 512,
+            "percent_used": round((total_mb / 512) * 100, 1),
+        }
+    except Exception:
+        logger.exception("failed to fetch MongoDB storage stats")
+        return None
