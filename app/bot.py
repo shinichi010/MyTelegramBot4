@@ -8,7 +8,7 @@ from telegram.ext import (
     MessageHandler, CallbackQueryHandler, ContextTypes, filters,
 )
 
-from . import config, downloader, db
+from . import config, downloader, db, tikhub
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
@@ -189,9 +189,33 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("adm:sticker:"):
         key = data.split(":", 2)[2]
         AWAITING_STICKER_EDIT[query.from_user.id] = key
+        current = db.get_sticker(key)
+        buttons = []
+        if current:
+            buttons.append([InlineKeyboardButton("🗑️ إلغاء الستيكر (رجوع للنص العادي)", callback_data=f"adm:sticker_rm:{key}")])
+        buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:stickers")])
         await query.edit_message_text(
-            f"📤 ارسل الستيكر اللي تريده لـ *{STICKER_LABELS.get(key, key)}* هسه.",
+            f"📤 ارسل الستيكر اللي تريده لـ *{STICKER_LABELS.get(key, key)}* هسه.\n\n"
+            + ("او الغيه بالزر تحت 👇" if current else ""),
             parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data.startswith("adm:sticker_rm:"):
+        key = data.split(":", 2)[2]
+        AWAITING_STICKER_EDIT.pop(query.from_user.id, None)
+        db.remove_sticker(key)
+        await query.answer("تم الإلغاء ✅", show_alert=False)
+        # نرجع لقائمة الستيكرات محدثة
+        buttons = []
+        for k, label in STICKER_LABELS.items():
+            state = "✅" if db.get_sticker(k) else "❌"
+            buttons.append([InlineKeyboardButton(
+                f"{state} {label}", callback_data=f"adm:sticker:{k}"
+            )])
+        buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")])
+        await query.edit_message_text(
+            "اختار الستيكر اللي تريد تحدده 👇", reply_markup=InlineKeyboardMarkup(buttons)
         )
 
     elif data == "adm:stats":
@@ -200,10 +224,39 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📊 *إحصائيات البوت*\n\n"
             f"👥 عدد المستخدمين: {stats['users']}\n"
             f"🔗 عدد الروابط المسجلة: {stats['links']}\n"
-            f"⛔ عدد المحظورين: {stats['banned']}"
+            f"⛔ عدد المحظورين: {stats['banned']}\n"
         )
+
+        # استهلاك MongoDB (من 512 ميكا المجانية)
+        storage = db.get_storage_stats()
+        if storage:
+            text += (
+                f"\n🗄️ *قاعدة البيانات (MongoDB)*\n"
+                f"مستخدم: {storage['total_mb']} ميكا من {storage['free_tier_limit_mb']} "
+                f"({storage['percent_used']}%)\n"
+            )
+
+        # استهلاك TikHub (اذا مفعّل)
+        if tikhub.is_configured():
+            usage = tikhub.get_usage()
+            if usage:
+                text += (
+                    f"\n🌐 *TikHub*\n"
+                    f"الرصيد: ${usage['balance']:.4f}\n"
+                    f"الرصيد المجاني المتبقي: ${usage['free_credit']:.4f}\n"
+                )
+            else:
+                text += "\n🌐 *TikHub*: تعذر جلب البيانات حالياً\n"
+
+        # رابط Render (استهلاك RAM/المساحة ما يوصله البوت برمجياً)
+        if config.RENDER_DASHBOARD_URL:
+            text += f"\n☁️ استهلاك السيرفر (RAM/مساحة): [افتح لوحة Render]({config.RENDER_DASHBOARD_URL})"
+
         buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
-        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+        await query.edit_message_text(
+            text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True,
+        )
 
     elif data == "adm:links":
         text = db.export_links_text()
