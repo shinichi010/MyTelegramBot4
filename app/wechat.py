@@ -45,11 +45,11 @@ def _tikhub_headers():
 
 
 def fetch_video_detail(share_url: str) -> dict:
-    """يستدعي TikHub fetch_video_detail ويرجع البيانات الخام (dict)."""
-    resp = requests.get(
+    """يستدعي TikHub fetch_video_detail (POST) ويرجع البيانات الخام (dict)."""
+    resp = requests.post(
         f"{TIKHUB_BASE}/fetch_video_detail",
-        headers=_tikhub_headers(),
-        params={"share_url": share_url},
+        headers={**_tikhub_headers(), "Content-Type": "application/json"},
+        json={"share_url": share_url, "raw": False},  # raw=false = بنية مبسطة، أسهل للتحميل
         timeout=30,  # التوثيق يحذر: سيرفر ويشات بطيء، لازم مهلة 30 ثانية
     )
     resp.raise_for_status()
@@ -57,29 +57,27 @@ def fetch_video_detail(share_url: str) -> dict:
 
 
 def _extract_media(detail: dict) -> dict:
-    """يستخرج رابط الفيديو المشفر + decode_key + معلومات صاحب المنشور من استجابة TikHub."""
-    data = detail.get("data", {})
-    object_desc = data.get("object_desc", {})
-    media_list = object_desc.get("media", [])
-    if not media_list:
+    """يستخرج رابط الفيديو المشفر + decode_key + معلومات صاحب المنشور من استجابة TikHub (raw=false)."""
+    data = detail.get("data")
+    if not data:
+        raise ValueError("الاستجابة فاضية - تأكد الرابط صحيح ومتاح")
+
+    media = data.get("media")
+    if not media:
         raise ValueError("ماكو ميديا بهذا المنشور (ممكن يكون منشور نصي/صور بس)")
 
-    media = media_list[0]
-    url = media.get("url", "")
-    url_token = media.get("url_token", "")
+    full_url = media.get("full_url", "")
     decode_key = media.get("decode_key", "")
 
-    if not url or not decode_key:
+    if not full_url or not decode_key:
         raise ValueError("الاستجابة ناقصة - ماكو رابط فيديو او decode_key")
-
-    full_url = url + url_token  # التوثيق يوضح: لازم تركيبهم مع بعض لتفادي حماية الرابط
 
     return {
         "download_url": full_url,
         "decode_key": decode_key,
         "uploader": data.get("nickname") or "",
         "uploader_id": data.get("username") or "",
-        "description": object_desc.get("description") or "",
+        "description": data.get("title") or "",
     }
 
 
