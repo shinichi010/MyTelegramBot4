@@ -131,6 +131,57 @@ async def download_douyin(url: str) -> tuple[list[str], dict]:
     return _fix_extensions(files), meta
 
 
+async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
+    """يحمل الصوت بس (MP3) من رابط X او دويين، لكل الفيديوهات بالمنشور اذا اكثر من وحدة."""
+    out_template = os.path.join(config.DOWNLOAD_DIR, f"{uuid.uuid4()}_%(playlist_index)s.%(ext)s")
+
+    def _download():
+        opts = _base_opts()
+        opts.update({
+            "format": "bestaudio/best",
+            "outtmpl": out_template,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+        })
+        if platform == "douyin" and config.DOUYIN_COOKIES_FILE:
+            opts["cookiefile"] = config.DOUYIN_COOKIES_FILE
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            entries = _entries_of(info)
+            meta = extract_meta(entries[0])
+            # بعد التحويل لـ mp3 الامتداد يتغير، نبني الاسم المتوقع يدوياً
+            files = []
+            for e in entries:
+                raw_name = ydl.prepare_filename(e)
+                base, _ = os.path.splitext(raw_name)
+                files.append(base + ".mp3")
+            return files, meta
+
+    files, meta = await asyncio.to_thread(_download)
+    return [f for f in files if os.path.exists(f)], meta
+
+
+async def verify_link(url: str, platform: str) -> bool:
+    """يتحقق ان الرابط شغال وقابل للوصول قبل لا نبدأ تحميل فعلي (فحص خفيف - بدون تحميل)."""
+
+    def _check():
+        opts = _base_opts()
+        opts["extract_flat"] = True  # فحص سريع بدون جلب كل تفاصيل الفورمات
+        if platform == "douyin" and config.DOUYIN_COOKIES_FILE:
+            opts["cookiefile"] = config.DOUYIN_COOKIES_FILE
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(url, download=False)
+            return True
+        except Exception:
+            return False
+
+    return await asyncio.to_thread(_check)
+
+
 def _fix_extensions(files: list[str]) -> list[str]:
     fixed = []
     for f in files:
