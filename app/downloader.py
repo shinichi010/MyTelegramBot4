@@ -73,18 +73,41 @@ async def list_x_qualities(url: str):
     entries = _entries_of(info)
     meta = extract_meta(entries[0])
 
-    # نجمع كل الدقات المتوفرة عبر كل الفيديوهات بالمنشور (اتحاد الدقات)
-    heights = set()
-    for entry in entries:
-        for f in (entry.get("formats") or []):
-            if f.get("vcodec") not in (None, "none") and f.get("height"):
-                heights.add(f["height"])
+    # نجمع كل الدقات المتوفرة، ونحسب أفضل تقدير حجم لكل دقة (فيديو + افضل صوت متوفر)
+    formats = entries[0].get("formats") or []
+    best_audio_size = 0
+    for f in formats:
+        if f.get("vcodec") in (None, "none") and f.get("acodec") not in (None, "none"):
+            size = f.get("filesize") or f.get("filesize_approx") or 0
+            if size > best_audio_size:
+                best_audio_size = size
 
-    sorted_heights = sorted(heights, reverse=True)[: config.MAX_QUALITY_OPTIONS]
-    if not sorted_heights:
-        sorted_heights = [0]  # يعني "أفضل جودة متوفرة" بدون تحديد دقة
+    by_height = {}  # height -> (video_size, has_own_audio)
+    for f in formats:
+        if f.get("vcodec") in (None, "none") or not f.get("height"):
+            continue
+        h = f["height"]
+        v_size = f.get("filesize") or f.get("filesize_approx") or 0
+        has_audio = f.get("acodec") not in (None, "none")
+        prev = by_height.get(h)
+        if prev is None or v_size > prev[0]:
+            by_height[h] = (v_size, has_audio)
 
-    return meta, sorted_heights, len(entries)
+    quality_options = []  # [(height, total_size_bytes_or_None)]
+    for h, (v_size, has_audio) in sorted(by_height.items(), key=lambda x: -x[0]):
+        if v_size == 0:
+            total = None  # ما نعرف الحجم
+        elif has_audio:
+            total = v_size
+        else:
+            total = v_size + best_audio_size
+        quality_options.append((h, total))
+
+    quality_options = quality_options[: config.MAX_QUALITY_OPTIONS]
+    if not quality_options:
+        quality_options = [(0, None)]  # يعني "أفضل جودة متوفرة" بدون تحديد دقة
+
+    return meta, quality_options, len(entries)
 
 
 async def download_x(url: str, height: int) -> tuple[list[str], dict]:
