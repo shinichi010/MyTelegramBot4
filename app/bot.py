@@ -496,33 +496,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text or ""
 
-    # ويشات (视频号) - يتحقق أول لأنه ما يمر عبر downloader.detect_platform العادي
-    if wechat.detect(text):
+    # نستخرج كل الروابط المدعومة الموجودة بالرسالة (كل سطر/رابط منفصل)
+    links = _extract_all_links(text)
+
+    if not links:
+        await update.message.reply_text(db.get_message("unsupported_link"))
+        return
+
+    if len(links) > 1:
+        await update.message.reply_text(
+            f"📋 لقيت {len(links)} روابط بالرسالة، راح انزلهن وحدة وحدة بالترتيب."
+        )
+
+    for platform, url in links:
+        await _process_single_link(update, context, user, platform, url)
+
+
+def _extract_all_links(text: str) -> list[tuple[str, str]]:
+    """يستخرج كل الروابط المدعومة (X/دويين/ويشات) من نص قد يحتوي عدة روابط."""
+    results = []
+    for line in text.split():
+        if wechat.detect(line):
+            results.append(("wechat", wechat.extract_url(line)))
+            continue
+        platform = downloader.detect_platform(line)
+        if platform:
+            results.append((platform, downloader.extract_url(line, platform)))
+    return results
+
+
+async def _process_single_link(update, context, user, platform: str, url: str):
+    if platform == "wechat":
         if db.is_platform_disabled("wechat"):
             await update.message.reply_text(db.get_message("platform_disabled"))
             return
         if not wechat.is_configured():
             await update.message.reply_text("تحميل ويشات مو مفعّل حالياً 🙏")
             return
-        wx_url = wechat.extract_url(text)
         if not _is_admin(user.id):
-            db.log_link(user.id, user.username or "", "wechat", wx_url)
-        await _handle_wechat(update, context, wx_url)
-        return
-
-    platform = downloader.detect_platform(text)
-
-    if not platform:
-        await update.message.reply_text(db.get_message("unsupported_link"))
+            db.log_link(user.id, user.username or "", "wechat", url)
+        await _handle_wechat(update, context, url)
         return
 
     if db.is_platform_disabled(platform):
         await update.message.reply_text(db.get_message("platform_disabled"))
         return
 
-    url = downloader.extract_url(text, platform)
-
-    # تسجيل الرابط بالسجل، إلا إذا كان مرسل من الأدمن نفسه
     if not _is_admin(user.id):
         db.log_link(user.id, user.username or "", platform, url)
 
@@ -531,7 +550,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok = await downloader.verify_link(url, platform)
         await check_msg.delete()
         if not ok:
-            await update.message.reply_text("هذا الرابط ما يشتغل او غير متاح ❌")
+            await update.message.reply_text(f"هذا الرابط ما يشتغل او غير متاح ❌\n{url}")
             return
 
     if platform == "douyin":
@@ -605,7 +624,7 @@ async def _resolve_upload_sticker_error(context: ContextTypes.DEFAULT_TYPE, chat
 async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     msg = await update.message.reply_text(db.get_message("fetching_qualities"))
     try:
-        meta, heights, count = await downloader.list_x_qualities(url)
+        meta, quality_options, count = await downloader.list_x_qualities(url)
     except Exception as e:
         logger.exception("x quality fetch failed")
         await msg.edit_text(db.get_message("quality_fetch_error", error=str(e)))
@@ -615,8 +634,11 @@ async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
     PENDING[req_id] = url
 
     buttons = []
-    for h in heights:
+    for h, size_bytes in quality_options:
         label = f"{h}p" if h else "أفضل جودة متوفرة"
+        if size_bytes:
+            size_mb = size_bytes / (1024 * 1024)
+            label += f" - {size_mb:.1f} ميكا"
         buttons.append([InlineKeyboardButton(
             label, callback_data=f"dl:{req_id}:{h}"
         )])
