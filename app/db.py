@@ -133,6 +133,22 @@ def remove_sticker(key: str) -> bool:
     return True
 
 
+# ---------- إعدادات عامة (مفاتيح/قيم بسيطة) ----------
+
+def get_setting(key: str, default=False):
+    if not is_connected():
+        return default
+    doc = _db.settings.find_one({"key": key})
+    return doc.get("value", default) if doc else default
+
+
+def set_setting(key: str, value):
+    if not is_connected():
+        return False
+    _db.settings.update_one({"key": key}, {"$set": {"value": value}}, upsert=True)
+    return True
+
+
 # ---------- المستخدمين ----------
 
 def upsert_user(user_id: int, username: str, full_name: str) -> bool:
@@ -158,6 +174,24 @@ def count_users() -> int:
     if not is_connected():
         return 0
     return _db.users.count_documents({})
+
+
+def get_user_info(user_id: int) -> dict | None:
+    if not is_connected():
+        return None
+    return _db.users.find_one({"user_id": user_id})
+
+
+def get_user_link_stats(user_id: int) -> dict:
+    """يرجع عدد الروابط اللي أرسلها مستخدم معين، مقسّمة حسب المنصة."""
+    if not is_connected():
+        return {"total": 0, "by_platform": {}}
+    pipeline = [
+        {"$match": {"user_id": user_id}},
+        {"$group": {"_id": "$platform", "count": {"$sum": 1}}},
+    ]
+    by_platform = {doc["_id"]: doc["count"] for doc in _db.links.aggregate(pipeline)}
+    return {"total": sum(by_platform.values()), "by_platform": by_platform}
 
 
 # ---------- الحظر ----------
