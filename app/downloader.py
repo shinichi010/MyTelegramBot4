@@ -34,6 +34,14 @@ def _base_opts():
     }
 
 
+def _cookie_file_for(platform: str):
+    if platform == "x":
+        return config.X_COOKIES_FILE
+    if platform == "douyin":
+        return config.DOUYIN_COOKIES_FILE
+    return None
+
+
 def _entries_of(info: dict) -> list[dict]:
     """يرجع كل الفيديوهات/العناصر بمنشور واحد (thread/gallery) كلستة."""
     if info.get("entries"):
@@ -56,6 +64,8 @@ async def list_x_qualities(url: str):
 
     def _extract():
         opts = _base_opts()
+        if config.X_COOKIES_FILE:
+            opts["cookiefile"] = config.X_COOKIES_FILE
         with yt_dlp.YoutubeDL(opts) as ydl:
             return ydl.extract_info(url, download=False)
 
@@ -95,6 +105,8 @@ async def download_x(url: str, height: int) -> tuple[list[str], dict]:
             "outtmpl": out_template,
             "merge_output_format": "mp4",
         })
+        if config.X_COOKIES_FILE:
+            opts["cookiefile"] = config.X_COOKIES_FILE
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             entries = _entries_of(info)
@@ -146,8 +158,9 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
                 "preferredquality": "192",
             }],
         })
-        if platform == "douyin" and config.DOUYIN_COOKIES_FILE:
-            opts["cookiefile"] = config.DOUYIN_COOKIES_FILE
+        cookie_file = _cookie_file_for(platform)
+        if cookie_file:
+            opts["cookiefile"] = cookie_file
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             entries = _entries_of(info)
@@ -176,8 +189,9 @@ async def verify_link(url: str, platform: str) -> bool:
 
     def _check():
         opts = _base_opts()
-        if platform == "douyin" and config.DOUYIN_COOKIES_FILE:
-            opts["cookiefile"] = config.DOUYIN_COOKIES_FILE
+        cookie_file = _cookie_file_for(platform)
+        if cookie_file:
+            opts["cookiefile"] = cookie_file
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=False)
