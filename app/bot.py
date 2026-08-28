@@ -95,6 +95,20 @@ def _is_admin(user_id: int) -> bool:
     return bool(config.ADMIN_CHAT_ID) and str(user_id) == str(config.ADMIN_CHAT_ID)
 
 
+def _post_info_enabled(user_id: int) -> bool:
+    """معلومات المنشور: اذا الأدمن أطفاها عام، تنطفي للكل بلا استثناء.
+    غير هيچ، كل مستخدم يقرر لحاله (افتراضياً مفعّلة)."""
+    if not db.get_setting("post_info_global_enabled", True):
+        return False
+    return db.get_user_pref(user_id, "show_post_info", True)
+
+
+def _verify_link_enabled(user_id: int) -> bool:
+    """التحقق من الرابط: الأدمن يحدد الافتراضي العام، وكل مستخدم يقدر يغيره لحاله."""
+    global_default = db.get_setting("verify_link_before_download", True)
+    return db.get_user_pref(user_id, "verify_link", global_default)
+
+
 async def _notify_admin_if_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not config.ADMIN_CHAT_ID:
         return
@@ -133,10 +147,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """إحصائيات شخصية للمستخدم نفسه - كم رابط حمّل ومن اي منصة."""
+    """إحصائيات شخصية للمستخدم نفسه - كم رابط حمّل ومن اي منصة + إعداداته الشخصية."""
     user = update.effective_user
-    info = db.get_user_info(user.id)
-    stats = db.get_user_link_stats(user.id)
+    text, markup = _build_stats_view(user.id)
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
+
+
+def _build_stats_view(user_id: int):
+    info = db.get_user_info(user_id)
+    stats = db.get_user_link_stats(user_id)
 
     platform_names = {"x": "X (تويتر)", "douyin": "دويين", "wechat": "ويشات"}
     lines = ["📊 *إحصائياتك بالبوت*\n"]
@@ -152,7 +171,39 @@ async def my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if stats["total"] == 0:
         lines.append("\nما عندك تحميلات مسجلة لحد هسه 📭")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    text = "\n".join(lines)
+
+    post_info_state = "🟢 مفعّلة" if _post_info_enabled(user_id) else "🔴 موقفة"
+    verify_state = "🟢 مفعّل" if _verify_link_enabled(user_id) else "🔴 موقف"
+
+    buttons = [
+        [InlineKeyboardButton(f"ℹ️ معلومات المنشور: {post_info_state}", callback_data="pref:toggle_post_info")],
+        [InlineKeyboardButton(f"🔎 التحقق من الرابط: {verify_state}", callback_data="pref:toggle_verify_link")],
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
+
+async def handle_pref_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+
+    if query.data == "pref:toggle_post_info":
+        if not db.get_setting("post_info_global_enabled", True):
+            await query.answer("معلومات المنشور موقفة عام من الأدمن حالياً 🚫", show_alert=True)
+        else:
+            current = db.get_user_pref(user_id, "show_post_info", True)
+            db.set_user_pref(user_id, "show_post_info", not current)
+            await query.answer()
+    elif query.data == "pref:toggle_verify_link":
+        current = _verify_link_enabled(user_id)
+        db.set_user_pref(user_id, "verify_link", not current)
+        await query.answer()
+    else:
+        await query.answer()
+        return
+
+    text, markup = _build_stats_view(user_id)
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
 
 
 # ==================== لوحة تحكم الأدمن ====================
@@ -167,7 +218,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
         [InlineKeyboardButton("📄 سجل الروابط", callback_data="adm:links")],
         [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
-        [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل", callback_data="adm:verify_toggle")],
+        [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل (افتراضي)", callback_data="adm:verify_toggle")],
+        [InlineKeyboardButton("ℹ️ معلومات المنشور (عام)", callback_data="adm:postinfo_toggle")],
         [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
     ]
     await update.message.reply_text(
@@ -341,18 +393,31 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
             [InlineKeyboardButton("📄 سجل الروابط", callback_data="adm:links")],
             [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
-            [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل", callback_data="adm:verify_toggle")],
+            [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل (افتراضي)", callback_data="adm:verify_toggle")],
+            [InlineKeyboardButton("ℹ️ معلومات المنشور (عام)", callback_data="adm:postinfo_toggle")],
             [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
         ]
         await query.edit_message_text("🛠️ لوحة تحكم الأدمن", reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data == "adm:verify_toggle":
-        current = db.get_setting("verify_link_before_download", False)
+        current = db.get_setting("verify_link_before_download", True)
         db.set_setting("verify_link_before_download", not current)
         new_state = "🟢 مفعّل" if not current else "🔴 موقف"
         buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
         await query.edit_message_text(
-            f"التحقق من الرابط قبل التحميل صار: {new_state}",
+            f"التحقق من الرابط قبل التحميل (الافتراضي العام) صار: {new_state}\n\n"
+            "ملاحظة: هذا يحدد الافتراضي بس - كل مستخدم يقدر يغيره لحاله من /stats.",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:postinfo_toggle":
+        current = db.get_setting("post_info_global_enabled", True)
+        db.set_setting("post_info_global_enabled", not current)
+        new_state = "🟢 مفعّلة" if not current else "🔴 موقفة بالكامل"
+        buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
+        await query.edit_message_text(
+            f"معلومات المنشور (عام لكل المستخدمين) صارت: {new_state}\n\n"
+            + ("" if not current else "ملاحظة: هذا يوقفها للكل بلا استثناء، حتى لو المستخدم مفعّلها لحاله."),
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -461,7 +526,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(user.id):
         db.log_link(user.id, user.username or "", platform, url)
 
-    if db.get_setting("verify_link_before_download", False):
+    if _verify_link_enabled(user.id):
         check_msg = await update.message.reply_text("🔎 جاري التحقق من الرابط...")
         ok = await downloader.verify_link(url, platform)
         await check_msg.delete()
@@ -601,9 +666,9 @@ async def _handle_douyin(update: Update, context: ContextTypes.DEFAULT_TYPE, url
         audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
             "🎵 حمل الصوت بس (MP3)", callback_data=f"aud:douyin:{req_id}"
         )]])
+        caption = _build_info_caption(meta, len(files)) if _post_info_enabled(update.effective_user.id) else "✅ تم"
         await context.bot.send_message(
-            chat_id, _build_info_caption(meta, len(files)),
-            parse_mode="Markdown", reply_markup=audio_btn,
+            chat_id, caption, parse_mode="Markdown", reply_markup=audio_btn,
         )
     except Exception as e:
         logger.exception("douyin download failed")
@@ -647,9 +712,10 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
             raise
         await _resolve_upload_sticker_success(sticker_msg)
 
-        await context.bot.send_message(
-            chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
-        )
+        if _post_info_enabled(update.effective_user.id):
+            await context.bot.send_message(
+                chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
+            )
     except Exception as e:
         logger.exception("wechat download failed")
         try:
@@ -711,9 +777,10 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             raise
         await _resolve_upload_sticker_success(sticker_msg)
 
-        await context.bot.send_message(
-            chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
-        )
+        if _post_info_enabled(update.effective_user.id):
+            await context.bot.send_message(
+                chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
+            )
     except Exception as e:
         logger.exception("x download failed")
         try:
@@ -794,6 +861,7 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^adm:"))
     app.add_handler(CallbackQueryHandler(handle_quality_choice, pattern=r"^dl:"))
     app.add_handler(CallbackQueryHandler(handle_audio_request, pattern=r"^aud:"))
+    app.add_handler(CallbackQueryHandler(handle_pref_toggle, pattern=r"^pref:"))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_admin_sticker))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
