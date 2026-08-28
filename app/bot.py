@@ -132,6 +132,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(db.get_message("welcome"), parse_mode="Markdown")
 
 
+async def my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """إحصائيات شخصية للمستخدم نفسه - كم رابط حمّل ومن اي منصة."""
+    user = update.effective_user
+    info = db.get_user_info(user.id)
+    stats = db.get_user_link_stats(user.id)
+
+    platform_names = {"x": "X (تويتر)", "douyin": "دويين", "wechat": "ويشات"}
+    lines = ["📊 *إحصائياتك بالبوت*\n"]
+
+    if info and info.get("joined_at"):
+        lines.append(f"📅 عضو منذ: {info['joined_at'].strftime('%Y-%m-%d')}")
+
+    lines.append(f"🔗 مجموع التحميلات: {stats['total']}")
+    for platform, count in stats["by_platform"].items():
+        name = platform_names.get(platform, platform)
+        lines.append(f"  • {name}: {count}")
+
+    if stats["total"] == 0:
+        lines.append("\nما عندك تحميلات مسجلة لحد هسه 📭")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 # ==================== لوحة تحكم الأدمن ====================
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,6 +167,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
         [InlineKeyboardButton("📄 سجل الروابط", callback_data="adm:links")],
         [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
+        [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل", callback_data="adm:verify_toggle")],
         [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
     ]
     await update.message.reply_text(
@@ -317,9 +341,16 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
             [InlineKeyboardButton("📄 سجل الروابط", callback_data="adm:links")],
             [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
+            [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل", callback_data="adm:verify_toggle")],
             [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
         ]
         await query.edit_message_text("🛠️ لوحة تحكم الأدمن", reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif data == "adm:verify_toggle":
+        current = db.get_setting("verify_link_before_download", False)
+        db.set_setting("verify_link_before_download", not current)
+        new_state = "🟢 مفعّل" if not current else "🔴 موقف"
+        await query.answer(f"التحقق من الرابط صار: {new_state}", show_alert=True)
 
 
 async def admin_callback_refresh_platforms(query):
@@ -426,6 +457,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(user.id):
         db.log_link(user.id, user.username or "", platform, url)
 
+    if db.get_setting("verify_link_before_download", False):
+        check_msg = await update.message.reply_text("🔎 جاري التحقق من الرابط...")
+        ok = await downloader.verify_link(url, platform)
+        await check_msg.delete()
+        if not ok:
+            await update.message.reply_text("هذا الرابط ما يشتغل او غير متاح ❌")
+            return
+
     if platform == "douyin":
         await _handle_douyin(update, context, url)
     else:
@@ -512,6 +551,7 @@ async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
         buttons.append([InlineKeyboardButton(
             label, callback_data=f"dl:{req_id}:{h}"
         )])
+    buttons.append([InlineKeyboardButton("🎵 صوت فقط (MP3)", callback_data=f"dl:{req_id}:audio")])
 
     extra = f" (المنشور فيه {count} مقاطع/صور، راح تنزل كلهن)" if count > 1 else ""
     await msg.edit_text(
@@ -552,8 +592,14 @@ async def _handle_douyin(update: Update, context: ContextTypes.DEFAULT_TYPE, url
             raise
         await _resolve_upload_sticker_success(sticker_msg)
 
+        req_id = uuid.uuid4().hex[:10]
+        PENDING[f"audio_douyin_{req_id}"] = url
+        audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
+            "🎵 حمل الصوت بس (MP3)", callback_data=f"aud:douyin:{req_id}"
+        )]])
         await context.bot.send_message(
-            chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
+            chat_id, _build_info_caption(meta, len(files)),
+            parse_mode="Markdown", reply_markup=audio_btn,
         )
     except Exception as e:
         logger.exception("douyin download failed")
@@ -617,8 +663,9 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     try:
-        _, req_id, height_str = query.data.split(":", 2)
-        height = int(height_str)
+        _, req_id, choice = query.data.split(":", 2)
+        is_audio = (choice == "audio")
+        height = 0 if is_audio else int(choice)
     except ValueError:
         await query.edit_message_text("طلب غير صالح ❌")
         return
@@ -635,7 +682,10 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     files = []
     took_heavy_slot = False
     try:
-        files, meta = await downloader.download_x(url, height)
+        if is_audio:
+            files, meta = await downloader.download_audio(url, "x")
+        else:
+            files, meta = await downloader.download_x(url, height)
 
         if not _check_size_ok(files):
             await query.edit_message_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
@@ -677,9 +727,46 @@ async def _send_file(update, context, path: str, chat_id=None):
     if lower.endswith((".jpg", ".jpeg", ".png", ".webp")):
         with open(path, "rb") as f:
             await context.bot.send_photo(chat_id, f)
+    elif lower.endswith((".mp3", ".m4a", ".ogg")):
+        with open(path, "rb") as f:
+            await context.bot.send_audio(chat_id, f)
     else:
         with open(path, "rb") as f:
             await context.bot.send_video(chat_id, f, supports_streaming=True)
+
+
+async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعالج زر 'حمل الصوت بس' اللي يطلع بعد تحميل فيديو دويين."""
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        _, platform, req_id = query.data.split(":", 2)
+    except ValueError:
+        return
+
+    url = PENDING.pop(f"audio_{platform}_{req_id}", None)
+    if not url:
+        await context.bot.send_message(query.message.chat_id, db.get_message("expired_request"))
+        return
+
+    chat_id = query.message.chat_id
+    status = await context.bot.send_message(chat_id, "🎵 جاري تحميل الصوت...")
+
+    files = []
+    try:
+        files, meta = await downloader.download_audio(url, platform)
+        if not files or not _check_size_ok(files):
+            await status.edit_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
+            return
+        await status.delete()
+        for path in files:
+            await _send_file(update, context, path, chat_id=chat_id)
+    except Exception as e:
+        logger.exception("audio download failed")
+        await status.edit_text(db.get_message("download_error", error=str(e)))
+    finally:
+        downloader.cleanup(files)
 
 
 def build_application() -> Application:
@@ -693,11 +780,13 @@ def build_application() -> Application:
     )
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stats", my_stats))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("ban", ban_command))
     app.add_handler(CommandHandler("unban", unban_command))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^adm:"))
     app.add_handler(CallbackQueryHandler(handle_quality_choice, pattern=r"^dl:"))
+    app.add_handler(CallbackQueryHandler(handle_audio_request, pattern=r"^aud:"))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_admin_sticker))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
