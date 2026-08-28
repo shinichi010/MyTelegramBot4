@@ -65,3 +65,18 @@ if DOUYIN_COOKIES_DATA:
         DOUYIN_COOKIES_FILE = None
 else:
     DOUYIN_COOKIES_FILE = None
+
+# --- كوكيز X مشفرة base64 (اختياري - تحل مشاكل "Video is unavailable" مع حسابات حقيقية) ---
+X_COOKIES_DATA = os.environ.get("X_COOKIES_DATA", "")
+X_COOKIES_FILE = "/tmp/x_cookies.txt"
+
+if X_COOKIES_DATA:
+    import base64
+    try:
+        with open(X_COOKIES_FILE, "wb") as f:
+            f.write(base64.b64decode(X_COOKIES_DATA))
+    except Exception as e:
+        print(f"⚠️ فشل فك تشفير كوكيز X: {e}")
+        X_COOKIES_FILE = None
+else:
+    X_COOKIES_FILE = None
