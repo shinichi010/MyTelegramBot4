@@ -194,6 +194,25 @@ def get_user_link_stats(user_id: int) -> dict:
     return {"total": sum(by_platform.values()), "by_platform": by_platform}
 
 
+# ---------- تفضيلات شخصية للمستخدم ----------
+
+def get_user_pref(user_id: int, key: str, default=None):
+    """يرجع تفضيل شخصي للمستخدم (مثل show_post_info, verify_link). None يعني ما حدده - يستخدم الافتراضي العام."""
+    if not is_connected():
+        return default
+    info = _db.users.find_one({"user_id": user_id}, {f"prefs.{key}": 1})
+    if not info or "prefs" not in info:
+        return default
+    return info["prefs"].get(key, default)
+
+
+def set_user_pref(user_id: int, key: str, value):
+    if not is_connected():
+        return False
+    _db.users.update_one({"user_id": user_id}, {"$set": {f"prefs.{key}": value}}, upsert=True)
+    return True
+
+
 # ---------- الحظر ----------
 
 def ban_user(user_id: int):
