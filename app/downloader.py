@@ -161,7 +161,14 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
             return files, meta
 
     files, meta = await asyncio.to_thread(_download)
-    return [f for f in files if os.path.exists(f)], meta
+    files = [f for f in files if os.path.exists(f)]
+
+    # اسم عرض للملف مبني على اسم صاحب الحساب (نظافة الاسم من رموز ممنوعة بأسماء الملفات)
+    uploader_name = meta.get("uploader") or meta.get("uploader_id") or "audio"
+    safe_name = re.sub(r'[\\/:*?"<>|]+', "_", uploader_name).strip() or "audio"
+    meta["audio_display_name"] = safe_name
+
+    return files, meta
 
 
 async def verify_link(url: str, platform: str) -> bool:
