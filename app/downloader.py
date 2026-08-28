@@ -172,11 +172,10 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
 
 
 async def verify_link(url: str, platform: str) -> bool:
-    """يتحقق ان الرابط شغال وقابل للوصول قبل لا نبدأ تحميل فعلي (فحص خفيف - بدون تحميل)."""
+    """يتحقق ان الرابط شغال وقابل للوصول قبل لا نبدأ تحميل فعلي (بدون تحميل فعلي للملف)."""
 
     def _check():
         opts = _base_opts()
-        opts["extract_flat"] = True  # فحص سريع بدون جلب كل تفاصيل الفورمات
         if platform == "douyin" and config.DOUYIN_COOKIES_FILE:
             opts["cookiefile"] = config.DOUYIN_COOKIES_FILE
         try:
