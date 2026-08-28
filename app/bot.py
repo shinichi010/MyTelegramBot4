@@ -350,7 +350,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current = db.get_setting("verify_link_before_download", False)
         db.set_setting("verify_link_before_download", not current)
         new_state = "🟢 مفعّل" if not current else "🔴 موقف"
-        await query.answer(f"التحقق من الرابط صار: {new_state}", show_alert=True)
+        buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
+        await query.edit_message_text(
+            f"التحقق من الرابط قبل التحميل صار: {new_state}",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
 
 
 async def admin_callback_refresh_platforms(query):
@@ -698,9 +702,10 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await query.message.delete()
 
         sticker_msg = await _show_upload_sticker(context, chat_id, "x")
+        display_name = meta.get("audio_display_name") if is_audio else None
         try:
             for path in files:
-                await _send_file(update, context, path, chat_id=chat_id)
+                await _send_file(update, context, path, chat_id=chat_id, display_name=display_name)
         except Exception:
             await _resolve_upload_sticker_error(context, chat_id, "x", sticker_msg)
             raise
@@ -721,15 +726,16 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             _release_heavy_slot()
 
 
-async def _send_file(update, context, path: str, chat_id=None):
+async def _send_file(update, context, path: str, chat_id=None, display_name: str = None):
     chat_id = chat_id or update.effective_chat.id
     lower = path.lower()
     if lower.endswith((".jpg", ".jpeg", ".png", ".webp")):
         with open(path, "rb") as f:
             await context.bot.send_photo(chat_id, f)
     elif lower.endswith((".mp3", ".m4a", ".ogg")):
+        filename = f"{display_name}.mp3" if display_name else None
         with open(path, "rb") as f:
-            await context.bot.send_audio(chat_id, f)
+            await context.bot.send_audio(chat_id, f, filename=filename)
     else:
         with open(path, "rb") as f:
             await context.bot.send_video(chat_id, f, supports_streaming=True)
@@ -760,8 +766,9 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
             await status.edit_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
             return
         await status.delete()
+        display_name = meta.get("audio_display_name")
         for path in files:
-            await _send_file(update, context, path, chat_id=chat_id)
+            await _send_file(update, context, path, chat_id=chat_id, display_name=display_name)
     except Exception as e:
         logger.exception("audio download failed")
         await status.edit_text(db.get_message("download_error", error=str(e)))
