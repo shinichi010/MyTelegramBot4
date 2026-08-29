@@ -88,6 +88,8 @@ PLATFORM_LABELS = (
     ("x", "X (تويتر)"),
     ("douyin", "دويين"),
     ("wechat", "ويشات"),
+    ("rednote", "RedNote (小红书)"),
+    ("bilibili", "Bilibili"),
 )
 
 
@@ -107,6 +109,28 @@ def _verify_link_enabled(user_id: int) -> bool:
     """التحقق من الرابط: الأدمن يحدد الافتراضي العام، وكل مستخدم يقدر يغيره لحاله."""
     global_default = db.get_setting("verify_link_before_download", True)
     return db.get_user_pref(user_id, "verify_link", global_default)
+
+
+FAILURE_ALERT_THRESHOLD = 5  # كم فشل متتالي لنفس المنصة قبل ما ننبه الأدمن
+
+
+async def _record_download_failure(context: ContextTypes.DEFAULT_TYPE, platform: str, error: str):
+    count = db.record_failure(platform)
+    if count == FAILURE_ALERT_THRESHOLD and config.ADMIN_CHAT_ID:
+        try:
+            await context.bot.send_message(
+                config.ADMIN_CHAT_ID,
+                f"⚠️ تنبيه: صار {count} حالات فشل متتالية بمنصة *{platform}*.\n"
+                f"آخر خطأ: {error[:300]}\n\n"
+                "ممكن الروابط تحتاج تحديث كوكيز، او فيه مشكلة بالمنصة نفسها.",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            logger.exception("failed to send failure alert to admin")
+
+
+def _record_download_success(platform: str):
+    db.reset_failures(platform)
 
 
 async def _notify_admin_if_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -220,6 +244,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
         [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل (افتراضي)", callback_data="adm:verify_toggle")],
         [InlineKeyboardButton("ℹ️ معلومات المنشور (عام)", callback_data="adm:postinfo_toggle")],
+        [InlineKeyboardButton("👥 تفعيل/تعطيل البوت بالمجاميع", callback_data="adm:groups_toggle")],
         [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
     ]
     await update.message.reply_text(
@@ -395,6 +420,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
             [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل (افتراضي)", callback_data="adm:verify_toggle")],
             [InlineKeyboardButton("ℹ️ معلومات المنشور (عام)", callback_data="adm:postinfo_toggle")],
+        [InlineKeyboardButton("👥 تفعيل/تعطيل البوت بالمجاميع", callback_data="adm:groups_toggle")],
             [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
         ]
         await query.edit_message_text("🛠️ لوحة تحكم الأدمن", reply_markup=InlineKeyboardMarkup(buttons))
@@ -418,6 +444,18 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             f"معلومات المنشور (عام لكل المستخدمين) صارت: {new_state}\n\n"
             + ("" if not current else "ملاحظة: هذا يوقفها للكل بلا استثناء، حتى لو المستخدم مفعّلها لحاله."),
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:groups_toggle":
+        current = db.get_setting("groups_enabled", True)
+        db.set_setting("groups_enabled", not current)
+        new_state = "🟢 مفعّل" if not current else "🔴 موقف"
+        buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
+        await query.edit_message_text(
+            f"عمل البوت داخل المجاميع/القنوات صار: {new_state}\n\n"
+            "ملاحظة: لازم تعطل Privacy Mode من BotFather حتى يقدر البوت يشوف "
+            "روابط بالمجموعة (مو بس الرسائل اللي تمنشنه او تكون /command).",
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -495,12 +533,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = update.message.text or ""
+    is_group = update.effective_chat.type in ("group", "supergroup")
 
     # نستخرج كل الروابط المدعومة الموجودة بالرسالة (كل سطر/رابط منفصل)
     links = _extract_all_links(text)
 
     if not links:
-        await update.message.reply_text(db.get_message("unsupported_link"))
+        # بالمجاميع/القنوات نتجاهل الرسائل العادية بصمت حتى ما نزعج المحادثة
+        if not is_group:
+            await update.message.reply_text(db.get_message("unsupported_link"))
+        return
+
+    if is_group and db.get_setting("groups_enabled", True) is False:
         return
 
     if len(links) > 1:
@@ -553,19 +597,27 @@ async def _process_single_link(update, context, user, platform: str, url: str):
             await update.message.reply_text(f"هذا الرابط ما يشتغل او غير متاح ❌\n{url}")
             return
 
-    if platform == "douyin":
-        await _handle_douyin(update, context, url)
-    else:
+    if platform in downloader.QUALITY_CHOICE_PLATFORMS:
         await _handle_x(update, context, url)
+    else:
+        await _handle_auto_download(update, context, url, platform)
+
+
+def _escape_md(text: str) -> str:
+    """يهرب الأحرف الخاصة بـ Markdown العادي حتى نص المستخدم/المنصة ما يكسر التنسيق."""
+    for ch in ("_", "*", "[", "]", "`"):
+        text = text.replace(ch, f"\\{ch}")
+    return text
 
 
 def _build_info_caption(meta: dict, count: int) -> str:
-    uploader = meta.get("uploader") or "غير معروف"
+    uploader = _escape_md(meta.get("uploader") or "غير معروف")
     uploader_id = meta.get("uploader_id")
-    handle = f"@{uploader_id}" if uploader_id else ""
+    handle = f"@{_escape_md(uploader_id)}" if uploader_id else ""
     description = meta.get("description") or "بدون وصف"
     if len(description) > 400:
         description = description[:400] + "..."
+    description = _escape_md(description)
 
     lines = ["ℹ️ *معلومات المنشور*", f"👤 الاسم: {uploader}"]
     if handle:
@@ -652,14 +704,20 @@ async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
 
 
 async def _handle_douyin(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    await _handle_auto_download(update, context, url, "douyin")
+
+
+async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, platform: str):
+    """معالج عام للمنصات اللي تنزل تلقائياً بأعلى جودة بدون قائمة اختيار (دويين، RedNote، Bilibili)."""
     chat_id = update.effective_chat.id
-    msg = await update.message.reply_text(db.get_message("downloading_douyin"))
+    status_key = "downloading_douyin" if platform == "douyin" else "downloading"
+    msg = await update.message.reply_text(db.get_message(status_key))
     await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
 
     files = []
     took_heavy_slot = False
     try:
-        files, meta = await downloader.download_douyin(url)
+        files, meta = await downloader.download_video(url, platform, 0)
         if not files:
             await msg.edit_text(db.get_message("download_error", error="ما گدرت انزل هذا المنشور"))
             return
@@ -674,26 +732,28 @@ async def _handle_douyin(update: Update, context: ContextTypes.DEFAULT_TYPE, url
 
         await msg.delete()
 
-        sticker_msg = await _show_upload_sticker(context, chat_id, "douyin")
+        sticker_msg = await _show_upload_sticker(context, chat_id, platform)
         try:
             for path in files:
                 await _send_file(update, context, path)
         except Exception:
-            await _resolve_upload_sticker_error(context, chat_id, "douyin", sticker_msg)
+            await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
             raise
         await _resolve_upload_sticker_success(sticker_msg)
 
         req_id = uuid.uuid4().hex[:10]
-        PENDING[f"audio_douyin_{req_id}"] = url
+        PENDING[f"audio_{platform}_{req_id}"] = url
         audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
-            "🎵 حمل الصوت بس (MP3)", callback_data=f"aud:douyin:{req_id}"
+            "🎵 حمل الصوت بس (MP3)", callback_data=f"aud:{platform}:{req_id}"
         )]])
         caption = _build_info_caption(meta, len(files)) if _post_info_enabled(update.effective_user.id) else "✅ تم"
         await context.bot.send_message(
             chat_id, caption, parse_mode="Markdown", reply_markup=audio_btn,
         )
+        _record_download_success(platform)
     except Exception as e:
-        logger.exception("douyin download failed")
+        logger.exception(f"{platform} download failed")
+        await _record_download_failure(context, platform, str(e))
         try:
             await msg.edit_text(db.get_message("download_error", error=str(e)))
         except Exception:
@@ -738,8 +798,10 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
             await context.bot.send_message(
                 chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
             )
+        _record_download_success("wechat")
     except Exception as e:
         logger.exception("wechat download failed")
+        await _record_download_failure(context, "wechat", str(e))
         try:
             await msg.edit_text(db.get_message("download_error", error=str(e)))
         except Exception:
@@ -803,8 +865,10 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(
                 chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
             )
+        _record_download_success("x")
     except Exception as e:
         logger.exception("x download failed")
+        await _record_download_failure(context, "x", str(e))
         try:
             await query.edit_message_text(db.get_message("download_error", error=str(e)))
         except Exception:
