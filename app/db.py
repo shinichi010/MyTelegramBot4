@@ -25,11 +25,12 @@ _db = None
 DEFAULT_MESSAGES = {
     "welcome": (
         "هلا بيك 👋\n\n"
-        "ارسلي رابط فيديو من *X (تويتر)* او *دويين* وراح أنزلّك المحتوى.\n\n"
+        "ارسلي رابط فيديو من *X (تويتر)*، *دويين*، *ويشات*، *RedNote*، او *Bilibili* "
+        "وراح أنزلّك المحتوى.\n\n"
         "▪️ روابط X: راح تطلع الك خيارات جودة تختار منها.\n"
-        "▪️ روابط دويين: يتنزل تلقائياً بأعلى جودة متوفرة (فيديو او صور)."
+        "▪️ باقي المنصات: تتنزل تلقائياً بأعلى جودة متوفرة (فيديو او صور)."
     ),
-    "unsupported_link": "بس روابط X (تويتر) او دويين مدعومة حالياً 🙏",
+    "unsupported_link": "بس روابط X، دويين، ويشات، RedNote، او Bilibili مدعومة حالياً 🙏",
     "fetching_qualities": "🔍 اجيب خيارات الجودة...",
     "choose_quality": "اختار الجودة اللي تريدها 👇",
     "downloading": "⬇️ جاري التحميل...",
@@ -147,6 +148,29 @@ def set_setting(key: str, value):
         return False
     _db.settings.update_one({"key": key}, {"$set": {"value": value}}, upsert=True)
     return True
+
+
+# ---------- تتبع الفشل المتكرر (لتنبيه الأدمن) ----------
+
+def record_failure(platform: str) -> int:
+    """يسجل فشل جديد لمنصة، يرجع عدد الفشل المتتالي الحالي."""
+    if not is_connected():
+        return 0
+    doc = _db.failure_tracking.find_one_and_update(
+        {"platform": platform},
+        {"$inc": {"consecutive_failures": 1}},
+        upsert=True,
+        return_document=True,
+    )
+    return doc.get("consecutive_failures", 1) if doc else 1
+
+
+def reset_failures(platform: str):
+    if not is_connected():
+        return
+    _db.failure_tracking.update_one(
+        {"platform": platform}, {"$set": {"consecutive_failures": 0}}, upsert=True
+    )
 
 
 # ---------- المستخدمين ----------
