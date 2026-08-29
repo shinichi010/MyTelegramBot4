@@ -1,5 +1,6 @@
 import logging
 import uuid
+from types import SimpleNamespace
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
@@ -123,6 +124,14 @@ def _verify_link_enabled(user_id: int) -> bool:
     return db.get_user_pref(user_id, "verify_link", global_default)
 
 
+def _preview_enabled(user_id: int) -> bool:
+    """معاينة سريعة (صورة مصغرة + مدة) قبل التحميل: اذا الأدمن أطفاها عام، تنطفي للكل.
+    غير هيچ، كل مستخدم يقرر لحاله (افتراضياً موقفة - المعاينة تبطئ التحميل شوي)."""
+    if not db.get_setting("preview_global_enabled", True):
+        return False
+    return db.get_user_pref(user_id, "show_preview", False)
+
+
 def _max_file_size_mb() -> int:
     """حد أقصى حجم الملف بالميكابايت - قابل للتعديل من /admin، ويرجع لقيمة MAX_FILE_SIZE_MB
     البيئية كافتراضي أول تشغيل."""
@@ -198,7 +207,78 @@ async def _notify_admin_if_new(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _notify_admin_if_new(update, context)
+
+    # دعم Deep Link: t.me/البوت?start=رابط_مشفر_base64 يبدأ التحميل تلقائياً
+    if context.args:
+        url = _decode_deep_link(context.args[0])
+        if url:
+            platform = downloader.detect_platform(url) or ("wechat" if wechat.detect(url) else None)
+            if platform:
+                user = update.effective_user
+                await _process_single_link(update, context, user, platform, url)
+                return
+        await update.message.reply_text("رابط الـ Deep Link غير صالح، جرب ترسل الرابط مباشرة ❌")
+        return
+
     await update.message.reply_text(db.get_message("welcome"), parse_mode="Markdown")
+
+
+def _decode_deep_link(payload: str) -> str | None:
+    """يفك ترميز base64url المستخدم بـ Deep Link ويرجع الرابط الأصلي، او None لو فشل."""
+    import base64
+    try:
+        # تليگرام يمنع = بنهاية base64 العادي، نضيفها احتياطياً حتى الفك يصير صحيح
+        padded = payload + "=" * (-len(payload) % 4)
+        decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
+        return decoded if decoded.startswith("http") else None
+    except Exception:
+        return None
+
+
+def build_deep_link(bot_username: str, url: str) -> str:
+    """يبني رابط Deep Link من رابط منصة عادي - يستخدم خارج البوت (بموقع/تطبيق آخر)."""
+    import base64
+    encoded = base64.urlsafe_b64encode(url.encode("utf-8")).decode("utf-8").rstrip("=")
+    return f"https://t.me/{bot_username}?start={encoded}"
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "📖 *الأوامر المتوفرة*\n\n"
+        "/start — رسالة الترحيب وشرح المنصات المدعومة\n"
+        "/stats — إحصائياتك الشخصية + إعدادات (معلومات المنشور، التحقق من الرابط)\n"
+        "/help — هذي الرسالة\n\n"
+        "📎 *شلون تستخدم البوت*\n"
+        "بس ارسل رابط من X، دويين، ويشات، RedNote، او Bilibili — تقدر ترسل عدة "
+        "روابط بنفس الرسالة وراح انزلهن وحدة وحدة بالترتيب.\n\n"
+        "▪️ روابط X، RedNote، وBilibili: تطلع الك خيارات جودة مع الحجم تختار منها.\n"
+        "▪️ روابط دويين وويشات: تتنزل تلقائياً بأعلى جودة متوفرة.\n"
+        "▪️ اي فيديو تكدر تحمل الصوت بس منه (MP3) بزر منفصل."
+    )
+    if _is_admin(update.effective_user.id):
+        text += "\n\n🛠️ انت أدمن - استخدم /admin لفتح لوحة التحكم."
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أمر أدمن: يبني رابط Deep Link جاهز من رابط منصة عادي، للاستخدام بموقع/تطبيق خارجي."""
+    if not _is_admin(update.effective_user.id):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "استخدم: /deeplink <رابط>\n"
+            "مثال: /deeplink https://x.com/user/status/123"
+        )
+        return
+
+    url = context.args[0]
+    bot_username = (await context.bot.get_me()).username
+    link = build_deep_link(bot_username, url)
+    await update.message.reply_text(
+        f"🔗 رابط Deep Link جاهز:\n`{link}`\n\n"
+        "أي شخص يضغط عليه يفتح البوت ويبدأ التحميل تلقائياً.",
+        parse_mode="Markdown",
+    )
 
 
 async def my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230,10 +310,12 @@ def _build_stats_view(user_id: int):
 
     post_info_state = "🟢 مفعّلة" if _post_info_enabled(user_id) else "🔴 موقفة"
     verify_state = "🟢 مفعّل" if _verify_link_enabled(user_id) else "🔴 موقف"
+    preview_state = "🟢 مفعّلة" if _preview_enabled(user_id) else "🔴 موقفة"
 
     buttons = [
         [InlineKeyboardButton(f"ℹ️ معلومات المنشور: {post_info_state}", callback_data="pref:toggle_post_info")],
         [InlineKeyboardButton(f"🔎 التحقق من الرابط: {verify_state}", callback_data="pref:toggle_verify_link")],
+        [InlineKeyboardButton(f"👁️ معاينة سريعة قبل التحميل: {preview_state}", callback_data="pref:toggle_preview")],
     ]
     return text, InlineKeyboardMarkup(buttons)
 
@@ -253,6 +335,13 @@ async def handle_pref_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
         current = _verify_link_enabled(user_id)
         db.set_user_pref(user_id, "verify_link", not current)
         await query.answer()
+    elif query.data == "pref:toggle_preview":
+        if not db.get_setting("preview_global_enabled", True):
+            await query.answer("المعاينة السريعة موقفة عام من الأدمن حالياً 🚫", show_alert=True)
+        else:
+            current = _preview_enabled(user_id)
+            db.set_user_pref(user_id, "show_preview", not current)
+            await query.answer()
     else:
         await query.answer()
         return
@@ -271,10 +360,12 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✏️ تعديل الرسائل", callback_data="adm:msgs")],
         [InlineKeyboardButton("🖼️ تعديل الستيكرات", callback_data="adm:stickers")],
         [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
+        [InlineKeyboardButton("🏆 أكثر المستخدمين نشاطاً", callback_data="adm:top_users")],
         [InlineKeyboardButton("📄 سجل الروابط", callback_data="adm:links")],
         [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
         [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل (افتراضي)", callback_data="adm:verify_toggle")],
         [InlineKeyboardButton("ℹ️ معلومات المنشور (عام)", callback_data="adm:postinfo_toggle")],
+        [InlineKeyboardButton("👁️ معاينة سريعة قبل التحميل (عام)", callback_data="adm:preview_toggle")],
         [InlineKeyboardButton("👥 تفعيل/تعطيل البوت بالمجاميع", callback_data="adm:groups_toggle")],
         [InlineKeyboardButton("⚙️ حدود الأحجام (تحميل/طابور)", callback_data="adm:limits")],
         [InlineKeyboardButton("🛠️ وضع الصيانة (إيقاف الرد للمستخدمين)", callback_data="adm:maintenance_toggle")],
@@ -400,6 +491,21 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_web_page_preview=True,
         )
 
+    elif data == "adm:top_users":
+        top = db.get_top_users(10)
+        if not top:
+            text = "ماكو بيانات كافية لحد هسه 📭"
+        else:
+            lines = ["🏆 *أكثر 10 مستخدمين نشاطاً*\n"]
+            medals = ["🥇", "🥈", "🥉"]
+            for i, u in enumerate(top):
+                medal = medals[i] if i < 3 else f"{i + 1}."
+                name = f"@{u['username']}" if u["username"] else f"آيدي {u['user_id']}"
+                lines.append(f"{medal} {name} — {u['count']} تحميل")
+            text = "\n".join(lines)
+        buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+
     elif data == "adm:links":
         text = db.export_links_text()
         if not text:
@@ -449,10 +555,12 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("✏️ تعديل الرسائل", callback_data="adm:msgs")],
             [InlineKeyboardButton("🖼️ تعديل الستيكرات", callback_data="adm:stickers")],
             [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
+        [InlineKeyboardButton("🏆 أكثر المستخدمين نشاطاً", callback_data="adm:top_users")],
             [InlineKeyboardButton("📄 سجل الروابط", callback_data="adm:links")],
             [InlineKeyboardButton("🚫 توقيف/تفعيل منصة", callback_data="adm:platforms")],
             [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل (افتراضي)", callback_data="adm:verify_toggle")],
             [InlineKeyboardButton("ℹ️ معلومات المنشور (عام)", callback_data="adm:postinfo_toggle")],
+        [InlineKeyboardButton("👁️ معاينة سريعة قبل التحميل (عام)", callback_data="adm:preview_toggle")],
         [InlineKeyboardButton("👥 تفعيل/تعطيل البوت بالمجاميع", callback_data="adm:groups_toggle")],
         [InlineKeyboardButton("⚙️ حدود الأحجام (تحميل/طابور)", callback_data="adm:limits")],
         [InlineKeyboardButton("🛠️ وضع الصيانة (إيقاف الرد للمستخدمين)", callback_data="adm:maintenance_toggle")],
@@ -478,6 +586,17 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
         await query.edit_message_text(
             f"معلومات المنشور (عام لكل المستخدمين) صارت: {new_state}\n\n"
+            + ("" if not current else "ملاحظة: هذا يوقفها للكل بلا استثناء، حتى لو المستخدم مفعّلها لحاله."),
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:preview_toggle":
+        current = db.get_setting("preview_global_enabled", True)
+        db.set_setting("preview_global_enabled", not current)
+        new_state = "🟢 مفعّلة" if not current else "🔴 موقفة بالكامل"
+        buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
+        await query.edit_message_text(
+            f"المعاينة السريعة (عام لكل المستخدمين) صارت: {new_state}\n\n"
             + ("" if not current else "ملاحظة: هذا يوقفها للكل بلا استثناء، حتى لو المستخدم مفعّلها لحاله."),
             reply_markup=InlineKeyboardMarkup(buttons),
         )
@@ -687,10 +806,78 @@ async def _process_single_link(update, context, user, platform: str, url: str):
             await update.message.reply_text(f"هذا الرابط ما يشتغل او غير متاح ❌\n{url}")
             return
 
+    if _preview_enabled(user.id):
+        preview = await downloader.get_preview(url, platform)
+        if preview and preview.get("thumbnail"):
+            duration = preview.get("duration")
+            duration_txt = f"⏱️ {int(duration // 60)}:{int(duration % 60):02d}" if duration else ""
+            title = preview.get("title", "")
+            if len(title) > 150:
+                title = title[:150] + "..."
+            caption = f"👁️ معاينة سريعة\n{title}\n{duration_txt}".strip()
+            try:
+                await context.bot.send_photo(update.effective_chat.id, preview["thumbnail"], caption=caption)
+            except Exception:
+                pass  # المعاينة اختيارية - ما نوقف التحميل لو فشلت
+
     if platform in downloader.QUALITY_CHOICE_PLATFORMS:
         await _handle_x(update, context, url, platform)
     else:
         await _handle_auto_download(update, context, url, platform)
+
+
+# تخزين مؤقت: retry_id قصير -> (url, platform) لزر "أعد المحاولة"
+RETRY_PENDING: dict[str, tuple[str, str]] = {}
+
+
+def _retry_keyboard(url: str, platform: str) -> InlineKeyboardMarkup:
+    retry_id = uuid.uuid4().hex[:10]
+    RETRY_PENDING[retry_id] = (url, platform)
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔄 أعد المحاولة", callback_data=f"retry:{retry_id}")]])
+
+
+async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str):
+    """يعرض رسالة الخطأ مع زر إعادة المحاولة. يحاول يعدل رسالة موجودة، وإلا يرسل وحدة جديدة."""
+    text = db.get_message("download_error", error=error)
+    keyboard = _retry_keyboard(url, platform)
+    try:
+        await msg.edit_text(text, reply_markup=keyboard)
+    except Exception:
+        await context.bot.send_message(chat_id, text, reply_markup=keyboard)
+
+
+async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        _, retry_id = query.data.split(":", 1)
+    except ValueError:
+        return
+
+    pending = RETRY_PENDING.pop(retry_id, None)
+    if not pending:
+        await query.edit_message_text(db.get_message("expired_request"))
+        return
+
+    url, platform = pending
+    user = query.from_user
+    chat_id = query.message.chat_id
+
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
+    # نرسل رسالة جديدة نستخدمها كـ update.message لباقي دوال المعالجة (اللي تعتمد عليها)
+    placeholder = await context.bot.send_message(chat_id, "🔄 جاري إعادة المحاولة...")
+    fake_update = SimpleNamespace(
+        message=placeholder,
+        effective_user=user,
+        effective_chat=query.message.chat,
+        callback_query=None,
+    )
+    await _process_single_link(fake_update, context, user, platform, url)
 
 
 def _escape_md(text: str) -> str:
@@ -809,7 +996,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         files, meta = await downloader.download_video(url, platform, 0)
         if not files:
-            await msg.edit_text(db.get_message("download_error", error="ما گدرت انزل هذا المنشور"))
+            await _send_error_with_retry(context, chat_id, msg, "ما گدرت انزل هذا المنشور", url, platform)
             return
 
         if not _check_size_ok(files):
@@ -844,10 +1031,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
-        try:
-            await msg.edit_text(db.get_message("download_error", error=str(e)))
-        except Exception:
-            await context.bot.send_message(chat_id, db.get_message("download_error", error=str(e)))
+        await _send_error_with_retry(context, chat_id, msg, str(e), url, platform)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -892,10 +1076,7 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
     except Exception as e:
         logger.exception("wechat download failed")
         await _record_download_failure(context, "wechat", str(e))
-        try:
-            await msg.edit_text(db.get_message("download_error", error=str(e)))
-        except Exception:
-            await context.bot.send_message(chat_id, db.get_message("download_error", error=str(e)))
+        await _send_error_with_retry(context, chat_id, msg, str(e), url, "wechat")
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -960,10 +1141,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
-        try:
-            await query.edit_message_text(db.get_message("download_error", error=str(e)))
-        except Exception:
-            await context.bot.send_message(chat_id, db.get_message("download_error", error=str(e)))
+        await _send_error_with_retry(context, chat_id, query.message, str(e), url, platform)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -1032,6 +1210,8 @@ def build_application() -> Application:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", my_stats))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("deeplink", deeplink_command))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("ban", ban_command))
     app.add_handler(CommandHandler("unban", unban_command))
@@ -1039,6 +1219,7 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(handle_quality_choice, pattern=r"^dl:"))
     app.add_handler(CallbackQueryHandler(handle_audio_request, pattern=r"^aud:"))
     app.add_handler(CallbackQueryHandler(handle_pref_toggle, pattern=r"^pref:"))
+    app.add_handler(CallbackQueryHandler(handle_retry, pattern=r"^retry:"))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_admin_sticker))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
