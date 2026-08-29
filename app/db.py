@@ -219,6 +219,25 @@ def get_user_link_stats(user_id: int) -> dict:
     return {"total": sum(by_platform.values()), "by_platform": by_platform}
 
 
+def get_top_users(limit: int = 10) -> list[dict]:
+    """يرجع أكثر المستخدمين نشاطاً (أعلى عدد روابط)، كل وحدة فيها user_id, username, count."""
+    if not is_connected():
+        return []
+    pipeline = [
+        {"$group": {"_id": {"user_id": "$user_id", "username": "$username"}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": limit},
+    ]
+    results = []
+    for doc in _db.links.aggregate(pipeline):
+        results.append({
+            "user_id": doc["_id"]["user_id"],
+            "username": doc["_id"].get("username") or "",
+            "count": doc["count"],
+        })
+    return results
+
+
 # ---------- تفضيلات شخصية للمستخدم ----------
 
 def get_user_pref(user_id: int, key: str, default=None):
