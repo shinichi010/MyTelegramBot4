@@ -61,7 +61,7 @@ if DOUYIN_COOKIES_DATA:
         with open(DOUYIN_COOKIES_FILE, "wb") as f:
             f.write(base64.b64decode(DOUYIN_COOKIES_DATA))
     except Exception as e:
-        print(f"⚠️ فشل فك تشفير كوكيز دويين: {e}")
+        print(f"⚠️ فشل دويين: {e}")
         DOUYIN_COOKIES_FILE = None
 else:
     DOUYIN_COOKIES_FILE = None
@@ -76,7 +76,22 @@ if X_COOKIES_DATA:
         with open(X_COOKIES_FILE, "wb") as f:
             f.write(base64.b64decode(X_COOKIES_DATA))
     except Exception as e:
-        print(f"⚠️ فشل فك تشفير كوكيز X: {e}")
+        print(f"⚠️ فشل X: {e}")
         X_COOKIES_FILE = None
 else:
     X_COOKIES_FILE = None
+
+# --- كوكيز RedNote/Xiaohongshu مشفرة base64 (اختياري - قد تحتاجها بعض الروابط) ---
+REDNOTE_COOKIES_DATA = os.environ.get("REDNOTE_COOKIES_DATA", "")
+REDNOTE_COOKIES_FILE = "/tmp/rednote_cookies.txt"
+
+if REDNOTE_COOKIES_DATA:
+    import base64
+    try:
+        with open(REDNOTE_COOKIES_FILE, "wb") as f:
+            f.write(base64.b64decode(REDNOTE_COOKIES_DATA))
+    except Exception as e:
+        print(f"⚠️ فشل RedNote: {e}")
+        REDNOTE_COOKIES_FILE = None
+else:
+    REDNOTE_COOKIES_FILE = None
