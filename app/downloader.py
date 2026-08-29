@@ -47,6 +47,9 @@ def _base_opts():
         "no_warnings": True,
         "noplaylist": True,
         "nocheckcertificate": True,
+        "socket_timeout": 60,
+        "retries": 5,
+        "fragment_retries": 5,
     }
 
 
@@ -242,6 +245,28 @@ async def verify_link(url: str, platform: str) -> bool:
             return False
 
     return await asyncio.to_thread(_check)
+
+
+async def get_preview(url: str, platform: str) -> dict | None:
+    """يجيب صورة مصغرة (thumbnail) ومدة الفيديو بدون تحميل فعلي، لعرض معاينة سريعة."""
+
+    def _fetch():
+        opts = _base_opts()
+        opts.update(_platform_opts(platform))
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception:
+            return None
+        entries = _entries_of(info)
+        entry = entries[0]
+        return {
+            "thumbnail": entry.get("thumbnail"),
+            "duration": entry.get("duration"),  # بالثواني
+            "title": entry.get("title") or "",
+        }
+
+    return await asyncio.to_thread(_fetch)
 
 
 def _fix_extensions(files: list[str]) -> list[str]:
