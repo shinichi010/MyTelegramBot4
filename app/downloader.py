@@ -8,19 +8,35 @@ from . import config
 
 X_PATTERN = re.compile(r"(https?://)?(www\.)?(twitter\.com|x\.com)/\S+", re.IGNORECASE)
 DOUYIN_PATTERN = re.compile(r"(https?://)?(www\.|v\.)?(douyin\.com|iesdouyin\.com)/\S+", re.IGNORECASE)
+REDNOTE_PATTERN = re.compile(
+    r"(https?://)?(www\.)?(xiaohongshu\.com|rednote\.com|xhslink\.com)/\S+", re.IGNORECASE
+)
+BILIBILI_PATTERN = re.compile(
+    r"(https?://)?(www\.)?(bilibili\.com|b23\.tv)/\S+", re.IGNORECASE
+)
+
+_PATTERNS = {
+    "x": X_PATTERN,
+    "douyin": DOUYIN_PATTERN,
+    "rednote": REDNOTE_PATTERN,
+    "bilibili": BILIBILI_PATTERN,
+}
+
+# المنصات اللي تعرض قائمة جودات للاختيار (مثل X). الباقي (دويين، RedNote، Bilibili)
+# تتنزل تلقائياً بأعلى جودة متوفرة بدون قائمة اختيار.
+QUALITY_CHOICE_PLATFORMS = {"x"}
 
 
 def detect_platform(text: str):
-    """يرجع 'x' او 'douyin' او None حسب الرابط الموجود بالنص."""
-    if X_PATTERN.search(text):
-        return "x"
-    if DOUYIN_PATTERN.search(text):
-        return "douyin"
+    """يرجع اسم المنصة او None حسب الرابط الموجود بالنص."""
+    for platform, pattern in _PATTERNS.items():
+        if pattern.search(text):
+            return platform
     return None
 
 
 def extract_url(text: str, platform: str) -> str:
-    pattern = X_PATTERN if platform == "x" else DOUYIN_PATTERN
+    pattern = _PATTERNS.get(platform, X_PATTERN)
     match = pattern.search(text)
     return match.group(0) if match else text.strip()
 
@@ -39,7 +55,24 @@ def _cookie_file_for(platform: str):
         return config.X_COOKIES_FILE
     if platform == "douyin":
         return config.DOUYIN_COOKIES_FILE
+    if platform == "rednote":
+        return config.REDNOTE_COOKIES_FILE
     return None
+
+
+def _platform_opts(platform: str) -> dict:
+    """خيارات إضافية خاصة بمنصة معينة (كوكيز، هيدرز خاصة تتطلبها بعض المواقع)."""
+    opts = {}
+    cookie_file = _cookie_file_for(platform)
+    if cookie_file:
+        opts["cookiefile"] = cookie_file
+    if platform == "bilibili":
+        # Bilibili أحياناً يرفض الطلب بدون هذول (خطأ 412 Precondition Failed)
+        opts["http_headers"] = {
+            "Referer": "https://www.bilibili.com/",
+            "Origin": "https://www.bilibili.com",
+        }
+    return opts
 
 
 def _entries_of(info: dict) -> list[dict]:
@@ -59,13 +92,13 @@ def extract_meta(info: dict) -> dict:
     }
 
 
-async def list_x_qualities(url: str):
-    """يستخرج خيارات جودة عامة (بالدقة) ومعلومات صاحب المنشور، ويدعم اكثر من فيديو بنفس الرابط."""
+async def list_qualities(url: str, platform: str = "x"):
+    """يستخرج خيارات جودة عامة (بالدقة + الحجم التقريبي) ومعلومات صاحب المنشور،
+    ويدعم اكثر من فيديو بنفس الرابط. مستخدمة حالياً لـ X بس (باقي المنصات تنزل تلقائياً)."""
 
     def _extract():
         opts = _base_opts()
-        if config.X_COOKIES_FILE:
-            opts["cookiefile"] = config.X_COOKIES_FILE
+        opts.update(_platform_opts(platform))
         with yt_dlp.YoutubeDL(opts) as ydl:
             return ydl.extract_info(url, download=False)
 
@@ -110,8 +143,14 @@ async def list_x_qualities(url: str):
     return meta, quality_options, len(entries)
 
 
-async def download_x(url: str, height: int) -> tuple[list[str], dict]:
-    """يحمل كل فيديوهات المنشور (وحدة او اكثر) بأقرب دقة ممكنة للدقة المختارة."""
+# اسم قديم متوافق - يبقى يشتغل بدون تغيير باقي الكود
+async def list_x_qualities(url: str):
+    return await list_qualities(url, "x")
+
+
+async def download_video(url: str, platform: str, height: int = 0) -> tuple[list[str], dict]:
+    """يحمل كل فيديوهات/صور المنشور (وحدة او اكثر) بأقرب دقة ممكنة للدقة المختارة
+    (height=0 يعني أفضل جودة متوفرة تلقائياً - مستخدم لكل المنصات غير X)."""
     out_template = os.path.join(
         config.DOWNLOAD_DIR, f"{uuid.uuid4()}_%(playlist_index)s.%(ext)s"
     )
@@ -127,9 +166,9 @@ async def download_x(url: str, height: int) -> tuple[list[str], dict]:
             "format": fmt,
             "outtmpl": out_template,
             "merge_output_format": "mp4",
+            "writethumbnail": False,
         })
-        if config.X_COOKIES_FILE:
-            opts["cookiefile"] = config.X_COOKIES_FILE
+        opts.update(_platform_opts(platform))
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             entries = _entries_of(info)
@@ -139,35 +178,19 @@ async def download_x(url: str, height: int) -> tuple[list[str], dict]:
 
     files, meta = await asyncio.to_thread(_download)
     return _fix_extensions(files), meta
+
+
+# أسماء قديمة متوافقة - تبقى تشتغل بدون تغيير باقي الكود
+async def download_x(url: str, height: int) -> tuple[list[str], dict]:
+    return await download_video(url, "x", height)
 
 
 async def download_douyin(url: str) -> tuple[list[str], dict]:
-    """يحمل فيديو دوين بأعلى جودة، او كل صور المنشور اذا كان سلايدشو، مع معلومات صاحب المنشور."""
-    out_template = os.path.join(config.DOWNLOAD_DIR, f"{uuid.uuid4()}_%(playlist_index)s.%(ext)s")
-
-    def _download():
-        opts = _base_opts()
-        opts.update({
-            "format": "bestvideo+bestaudio/best",
-            "outtmpl": out_template,
-            "merge_output_format": "mp4",
-            "writethumbnail": False,
-        })
-        if config.DOUYIN_COOKIES_FILE:
-            opts["cookiefile"] = config.DOUYIN_COOKIES_FILE
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            entries = _entries_of(info)
-            meta = extract_meta(entries[0])
-            files = [ydl.prepare_filename(e) for e in entries]
-            return files, meta
-
-    files, meta = await asyncio.to_thread(_download)
-    return _fix_extensions(files), meta
+    return await download_video(url, "douyin", 0)
 
 
 async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
-    """يحمل الصوت بس (MP3) من رابط X او دويين، لكل الفيديوهات بالمنشور اذا اكثر من وحدة."""
+    """يحمل الصوت بس (MP3) من اي منصة مدعومة، لكل الفيديوهات بالمنشور اذا اكثر من وحدة."""
     out_template = os.path.join(config.DOWNLOAD_DIR, f"{uuid.uuid4()}_%(playlist_index)s.%(ext)s")
 
     def _download():
@@ -181,9 +204,7 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
                 "preferredquality": "192",
             }],
         })
-        cookie_file = _cookie_file_for(platform)
-        if cookie_file:
-            opts["cookiefile"] = cookie_file
+        opts.update(_platform_opts(platform))
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             entries = _entries_of(info)
@@ -212,9 +233,7 @@ async def verify_link(url: str, platform: str) -> bool:
 
     def _check():
         opts = _base_opts()
-        cookie_file = _cookie_file_for(platform)
-        if cookie_file:
-            opts["cookiefile"] = cookie_file
+        opts.update(_platform_opts(platform))
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=False)
