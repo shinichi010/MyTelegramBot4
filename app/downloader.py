@@ -22,9 +22,9 @@ _PATTERNS = {
     "bilibili": BILIBILI_PATTERN,
 }
 
-# المنصات اللي تعرض قائمة جودات للاختيار (مثل X). الباقي (دويين، RedNote، Bilibili)
-# تتنزل تلقائياً بأعلى جودة متوفرة بدون قائمة اختيار.
-QUALITY_CHOICE_PLATFORMS = {"x"}
+# المنصات اللي تعرض قائمة جودات للاختيار قبل التحميل. الباقي (دويين، ويشات) يتنزل
+# تلقائياً بأعلى جودة متوفرة بدون قائمة اختيار.
+QUALITY_CHOICE_PLATFORMS = {"x", "rednote", "bilibili"}
 
 
 def detect_platform(text: str):
