@@ -65,6 +65,7 @@ EDITABLE_MESSAGES = {
     "expired_request": "انتهاء صلاحية الطلب",
     "platform_disabled": "منصة موقوفة",
     "user_banned": "مستخدم محظور",
+    "maintenance_mode": "وضع الصيانة",
     "file_too_large": "الملف كبير جداً",
     "queue_wait": "انتظار بالطابور",
 }
@@ -75,6 +76,13 @@ AWAITING_MESSAGE_EDIT: dict[int, str] = {}
 # محادثة تعديل ستيكر (أدمن فقط): user_id -> key الستيكر اللي ينتظر يرسله
 AWAITING_STICKER_EDIT: dict[int, str] = {}
 
+# محادثة تعديل حد رقمي (أدمن فقط): user_id -> اسم الإعداد ("max_file_size_mb" او "heavy_file_threshold_mb")
+AWAITING_LIMIT_EDIT: dict[int, str] = {}
+LIMIT_LABELS = {
+    "max_file_size_mb": "أقصى حجم ملف (ميكا)",
+    "heavy_file_threshold_mb": "حد تفعيل الطابور (ميكا)",
+}
+
 STICKER_LABELS = {
     "upload_x": "ستيكر الرفع - X",
     "error_x": "ستيكر الخطأ - X",
@@ -82,6 +90,10 @@ STICKER_LABELS = {
     "error_douyin": "ستيكر الخطأ - دويين",
     "upload_wechat": "ستيكر الرفع - ويشات",
     "error_wechat": "ستيكر الخطأ - ويشات",
+    "upload_rednote": "ستيكر الرفع - RedNote",
+    "error_rednote": "ستيكر الخطأ - RedNote",
+    "upload_bilibili": "ستيكر الرفع - Bilibili",
+    "error_bilibili": "ستيكر الخطأ - Bilibili",
 }
 
 PLATFORM_LABELS = (
@@ -109,6 +121,25 @@ def _verify_link_enabled(user_id: int) -> bool:
     """التحقق من الرابط: الأدمن يحدد الافتراضي العام، وكل مستخدم يقدر يغيره لحاله."""
     global_default = db.get_setting("verify_link_before_download", True)
     return db.get_user_pref(user_id, "verify_link", global_default)
+
+
+def _max_file_size_mb() -> int:
+    """حد أقصى حجم الملف بالميكابايت - قابل للتعديل من /admin، ويرجع لقيمة MAX_FILE_SIZE_MB
+    البيئية كافتراضي أول تشغيل."""
+    return int(db.get_setting("max_file_size_mb", config.MAX_FILE_SIZE_MB))
+
+
+def _max_file_size_bytes() -> int:
+    return _max_file_size_mb() * 1024 * 1024
+
+
+def _heavy_threshold_mb() -> int:
+    """الحجم اللي فوقه يفعّل نظام الطابور - قابل للتعديل من /admin."""
+    return int(db.get_setting("heavy_file_threshold_mb", config.HEAVY_FILE_THRESHOLD_MB))
+
+
+def _heavy_threshold_bytes() -> int:
+    return _heavy_threshold_mb() * 1024 * 1024
 
 
 FAILURE_ALERT_THRESHOLD = 5  # كم فشل متتالي لنفس المنصة قبل ما ننبه الأدمن
@@ -245,6 +276,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل (افتراضي)", callback_data="adm:verify_toggle")],
         [InlineKeyboardButton("ℹ️ معلومات المنشور (عام)", callback_data="adm:postinfo_toggle")],
         [InlineKeyboardButton("👥 تفعيل/تعطيل البوت بالمجاميع", callback_data="adm:groups_toggle")],
+        [InlineKeyboardButton("⚙️ حدود الأحجام (تحميل/طابور)", callback_data="adm:limits")],
+        [InlineKeyboardButton("🛠️ وضع الصيانة (إيقاف الرد للمستخدمين)", callback_data="adm:maintenance_toggle")],
         [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
     ]
     await update.message.reply_text(
@@ -421,6 +454,8 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔎 التحقق من الرابط قبل التحميل (افتراضي)", callback_data="adm:verify_toggle")],
             [InlineKeyboardButton("ℹ️ معلومات المنشور (عام)", callback_data="adm:postinfo_toggle")],
         [InlineKeyboardButton("👥 تفعيل/تعطيل البوت بالمجاميع", callback_data="adm:groups_toggle")],
+        [InlineKeyboardButton("⚙️ حدود الأحجام (تحميل/طابور)", callback_data="adm:limits")],
+        [InlineKeyboardButton("🛠️ وضع الصيانة (إيقاف الرد للمستخدمين)", callback_data="adm:maintenance_toggle")],
             [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
         ]
         await query.edit_message_text("🛠️ لوحة تحكم الأدمن", reply_markup=InlineKeyboardMarkup(buttons))
@@ -456,6 +491,43 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"عمل البوت داخل المجاميع/القنوات صار: {new_state}\n\n"
             "ملاحظة: لازم تعطل Privacy Mode من BotFather حتى يقدر البوت يشوف "
             "روابط بالمجموعة (مو بس الرسائل اللي تمنشنه او تكون /command).",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:limits":
+        buttons = [
+            [InlineKeyboardButton(
+                f"📦 {LIMIT_LABELS['max_file_size_mb']}: {_max_file_size_mb()} ميكا",
+                callback_data="adm:limit_edit:max_file_size_mb",
+            )],
+            [InlineKeyboardButton(
+                f"⏳ {LIMIT_LABELS['heavy_file_threshold_mb']}: {_heavy_threshold_mb()} ميكا",
+                callback_data="adm:limit_edit:heavy_file_threshold_mb",
+            )],
+            [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")],
+        ]
+        await query.edit_message_text(
+            "اضغط على الحد اللي تريد تغيره 👇", reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    elif data.startswith("adm:limit_edit:"):
+        key = data.split(":", 2)[2]
+        current = _max_file_size_mb() if key == "max_file_size_mb" else _heavy_threshold_mb()
+        AWAITING_LIMIT_EDIT[query.from_user.id] = key
+        await query.edit_message_text(
+            f"القيمة الحالية لـ *{LIMIT_LABELS[key]}*: {current} ميكا\n\n"
+            "ارسل الرقم الجديد هسه (بالميكابايت، مثلاً 300).",
+            parse_mode="Markdown",
+        )
+
+    elif data == "adm:maintenance_toggle":
+        current = db.get_setting("maintenance_mode", False)
+        db.set_setting("maintenance_mode", not current)
+        new_state = "🔴 مفعّل (البوت متوقف عن الرد للمستخدمين)" if not current else "🟢 موقف (البوت شغال عادي)"
+        buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")]]
+        await query.edit_message_text(
+            f"وضع الصيانة صار: {new_state}\n\n"
+            "ملاحظة: انت (الأدمن) تقدر تستخدم البوت عادي حتى وهو بوضع الصيانة.",
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -526,10 +598,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ تحدثت رسالة: {EDITABLE_MESSAGES.get(key, key)}")
         return
 
+    # اذا الأدمن ينتظر منه رقم حد جديد (حجم ملف / حد الطابور)
+    if _is_admin(user.id) and user.id in AWAITING_LIMIT_EDIT:
+        key = AWAITING_LIMIT_EDIT.pop(user.id)
+        try:
+            new_value = int((update.message.text or "").strip())
+            if new_value <= 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text("لازم ترسل رقم صحيح اكبر من صفر ❌")
+            return
+        db.set_setting(key, new_value)
+        await update.message.reply_text(f"✅ صار {LIMIT_LABELS[key]}: {new_value} ميكا")
+        return
+
     await _notify_admin_if_new(update, context)
 
     if db.is_banned(user.id):
         await update.message.reply_text(db.get_message("user_banned"))
+        return
+
+    if db.get_setting("maintenance_mode", False) and not _is_admin(user.id):
+        await update.message.reply_text(db.get_message("maintenance_mode"))
         return
 
     text = update.message.text or ""
@@ -598,7 +688,7 @@ async def _process_single_link(update, context, user, platform: str, url: str):
             return
 
     if platform in downloader.QUALITY_CHOICE_PLATFORMS:
-        await _handle_x(update, context, url)
+        await _handle_x(update, context, url, platform)
     else:
         await _handle_auto_download(update, context, url, platform)
 
@@ -631,7 +721,7 @@ def _build_info_caption(meta: dict, count: int) -> str:
 def _check_size_ok(files: list[str]) -> bool:
     import os
     total = sum(os.path.getsize(f) for f in files if os.path.exists(f))
-    return total <= config.MAX_FILE_SIZE_BYTES
+    return total <= _max_file_size_bytes()
 
 
 def _total_size(files: list[str]) -> int:
@@ -673,17 +763,17 @@ async def _resolve_upload_sticker_error(context: ContextTypes.DEFAULT_TYPE, chat
             logger.exception("failed to send error sticker")
 
 
-async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, platform: str = "x"):
     msg = await update.message.reply_text(db.get_message("fetching_qualities"))
     try:
-        meta, quality_options, count = await downloader.list_x_qualities(url)
+        meta, quality_options, count = await downloader.list_qualities(url, platform)
     except Exception as e:
-        logger.exception("x quality fetch failed")
+        logger.exception(f"{platform} quality fetch failed")
         await msg.edit_text(db.get_message("quality_fetch_error", error=str(e)))
         return
 
     req_id = uuid.uuid4().hex[:10]
-    PENDING[req_id] = url
+    PENDING[req_id] = (url, platform)
 
     buttons = []
     for h, size_bytes in quality_options:
@@ -723,10 +813,10 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         if not _check_size_ok(files):
-            await msg.edit_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
+            await msg.edit_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
             return
 
-        if _total_size(files) >= config.HEAVY_FILE_THRESHOLD_BYTES:
+        if _total_size(files) >= _heavy_threshold_bytes():
             await _acquire_heavy_slot(update, context, chat_id)
             took_heavy_slot = True
 
@@ -776,10 +866,10 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
         files = [path]
 
         if not _check_size_ok(files):
-            await msg.edit_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
+            await msg.edit_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
             return
 
-        if _total_size(files) >= config.HEAVY_FILE_THRESHOLD_BYTES:
+        if _total_size(files) >= _heavy_threshold_bytes():
             await _acquire_heavy_slot(update, context, chat_id)
             took_heavy_slot = True
 
@@ -824,10 +914,11 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("طلب غير صالح ❌")
         return
 
-    url = PENDING.pop(req_id, None)
-    if not url:
+    pending = PENDING.pop(req_id, None)
+    if not pending:
         await query.edit_message_text(db.get_message("expired_request"))
         return
+    url, platform = pending
 
     await query.edit_message_text(db.get_message("downloading"))
     await context.bot.send_chat_action(query.message.chat_id, ChatAction.UPLOAD_VIDEO)
@@ -837,27 +928,27 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     took_heavy_slot = False
     try:
         if is_audio:
-            files, meta = await downloader.download_audio(url, "x")
+            files, meta = await downloader.download_audio(url, platform)
         else:
-            files, meta = await downloader.download_x(url, height)
+            files, meta = await downloader.download_video(url, platform, height)
 
         if not _check_size_ok(files):
-            await query.edit_message_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
+            await query.edit_message_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
             return
 
-        if _total_size(files) >= config.HEAVY_FILE_THRESHOLD_BYTES:
+        if _total_size(files) >= _heavy_threshold_bytes():
             await _acquire_heavy_slot(update, context, chat_id)
             took_heavy_slot = True
 
         await query.message.delete()
 
-        sticker_msg = await _show_upload_sticker(context, chat_id, "x")
+        sticker_msg = await _show_upload_sticker(context, chat_id, platform)
         display_name = meta.get("audio_display_name") if is_audio else None
         try:
             for path in files:
                 await _send_file(update, context, path, chat_id=chat_id, display_name=display_name)
         except Exception:
-            await _resolve_upload_sticker_error(context, chat_id, "x", sticker_msg)
+            await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
             raise
         await _resolve_upload_sticker_success(sticker_msg)
 
@@ -865,10 +956,10 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(
                 chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
             )
-        _record_download_success("x")
+        _record_download_success(platform)
     except Exception as e:
-        logger.exception("x download failed")
-        await _record_download_failure(context, "x", str(e))
+        logger.exception(f"{platform} download failed")
+        await _record_download_failure(context, platform, str(e))
         try:
             await query.edit_message_text(db.get_message("download_error", error=str(e)))
         except Exception:
@@ -916,7 +1007,7 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         files, meta = await downloader.download_audio(url, platform)
         if not files or not _check_size_ok(files):
-            await status.edit_text(db.get_message("file_too_large", max_size=config.MAX_FILE_SIZE_MB))
+            await status.edit_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
             return
         await status.delete()
         display_name = meta.get("audio_display_name")
