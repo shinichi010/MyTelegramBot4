@@ -18,7 +18,7 @@ PORT = int(os.environ.get("PORT", "10000"))
 EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
 
 # --- فترة البينك الذاتي بالثواني (افتراضي كل 10 دقايق) ---
-PING_INTERVAL = int(os.environ.get("PING_INTERVAL", "600"))
+PING_INTERVAL = int(os.environ.get("PING_INTERVAL", "840"))
 
 # --- مجلد التحميل المؤقت ---
 DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "/tmp/downloads")
