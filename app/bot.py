@@ -77,11 +77,19 @@ AWAITING_MESSAGE_EDIT: dict[int, str] = {}
 # محادثة تعديل ستيكر (أدمن فقط): user_id -> key الستيكر اللي ينتظر يرسله
 AWAITING_STICKER_EDIT: dict[int, str] = {}
 
-# محادثة تعديل حد رقمي (أدمن فقط): user_id -> اسم الإعداد ("max_file_size_mb" او "heavy_file_threshold_mb")
+# محادثة تعديل حد رقمي (أدمن فقط): user_id -> اسم الإعداد
 AWAITING_LIMIT_EDIT: dict[int, str] = {}
 LIMIT_LABELS = {
     "max_file_size_mb": "أقصى حجم ملف (ميكا)",
     "heavy_file_threshold_mb": "حد تفعيل الطابور (ميكا)",
+    "main_ping_interval_min": "فاصل بينك البوت الرئيسي (دقايق)",
+    "wechat_ping_interval_min": "فاصل بينك خدمة ويشات (دقايق)",
+}
+LIMIT_UNITS = {
+    "max_file_size_mb": "ميكا",
+    "heavy_file_threshold_mb": "ميكا",
+    "main_ping_interval_min": "دقايق",
+    "wechat_ping_interval_min": "دقايق",
 }
 
 STICKER_LABELS = {
@@ -149,6 +157,17 @@ def _heavy_threshold_mb() -> int:
 
 def _heavy_threshold_bytes() -> int:
     return _heavy_threshold_mb() * 1024 * 1024
+
+
+def _get_limit_value(key: str) -> int:
+    """يجيب القيمة الحالية لأي إعداد رقمي قابل للتعديل من قائمة الحدود بـ /admin."""
+    defaults = {
+        "max_file_size_mb": config.MAX_FILE_SIZE_MB,
+        "heavy_file_threshold_mb": config.HEAVY_FILE_THRESHOLD_MB,
+        "main_ping_interval_min": config.PING_INTERVAL // 60,
+        "wechat_ping_interval_min": 10,
+    }
+    return int(db.get_setting(key, defaults.get(key, 0)))
 
 
 FAILURE_ALERT_THRESHOLD = 5  # كم فشل متتالي لنفس المنصة قبل ما ننبه الأدمن
@@ -623,6 +642,18 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"⏳ {LIMIT_LABELS['heavy_file_threshold_mb']}: {_heavy_threshold_mb()} ميكا",
                 callback_data="adm:limit_edit:heavy_file_threshold_mb",
             )],
+            [InlineKeyboardButton(
+                f"🤖 {LIMIT_LABELS['main_ping_interval_min']}: {_get_limit_value('main_ping_interval_min')} دقايق",
+                callback_data="adm:limit_edit:main_ping_interval_min",
+            )],
+            [InlineKeyboardButton(
+                f"🈶 {LIMIT_LABELS['wechat_ping_interval_min']}: {_get_limit_value('wechat_ping_interval_min')} دقايق",
+                callback_data="adm:limit_edit:wechat_ping_interval_min",
+            )],
+            [InlineKeyboardButton(
+                f"🈶 بينك خدمة ويشات: {'🟢 مفعّل' if db.get_setting('wechat_ping_enabled', True) else '🔴 موقف'}",
+                callback_data="adm:wechat_ping_toggle",
+            )],
             [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")],
         ]
         await query.edit_message_text(
@@ -631,12 +662,24 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("adm:limit_edit:"):
         key = data.split(":", 2)[2]
-        current = _max_file_size_mb() if key == "max_file_size_mb" else _heavy_threshold_mb()
+        current = _get_limit_value(key)
+        unit = LIMIT_UNITS.get(key, "")
         AWAITING_LIMIT_EDIT[query.from_user.id] = key
         await query.edit_message_text(
-            f"القيمة الحالية لـ *{LIMIT_LABELS[key]}*: {current} ميكا\n\n"
-            "ارسل الرقم الجديد هسه (بالميكابايت، مثلاً 300).",
+            f"القيمة الحالية لـ *{LIMIT_LABELS[key]}*: {current} {unit}\n\n"
+            f"ارسل الرقم الجديد هسه (بـ{unit}).",
             parse_mode="Markdown",
+        )
+
+    elif data == "adm:wechat_ping_toggle":
+        current = db.get_setting("wechat_ping_enabled", True)
+        db.set_setting("wechat_ping_enabled", not current)
+        new_state = "🔴 موقف" if current else "🟢 مفعّل"
+        buttons = [[InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")]]
+        await query.edit_message_text(
+            f"بينك خدمة ويشات صار: {new_state}\n\n"
+            "ملاحظة: هذا مالة علاقة بالبوت الرئيسي إطلاقاً - يوقف بس بينك خدمة فك تشفير ويشات المنفصلة.",
+            reply_markup=InlineKeyboardMarkup(buttons),
         )
 
     elif data == "adm:maintenance_toggle":
@@ -717,7 +760,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ تحدثت رسالة: {EDITABLE_MESSAGES.get(key, key)}")
         return
 
-    # اذا الأدمن ينتظر منه رقم حد جديد (حجم ملف / حد الطابور)
+    # اذا الأدمن ينتظر منه رقم حد جديد (حجم ملف / حد الطابور / فاصل بينك)
     if _is_admin(user.id) and user.id in AWAITING_LIMIT_EDIT:
         key = AWAITING_LIMIT_EDIT.pop(user.id)
         try:
@@ -728,7 +771,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("لازم ترسل رقم صحيح اكبر من صفر ❌")
             return
         db.set_setting(key, new_value)
-        await update.message.reply_text(f"✅ صار {LIMIT_LABELS[key]}: {new_value} ميكا")
+        unit = LIMIT_UNITS.get(key, "")
+        await update.message.reply_text(f"✅ صار {LIMIT_LABELS[key]}: {new_value} {unit}")
         return
 
     await _notify_admin_if_new(update, context)
