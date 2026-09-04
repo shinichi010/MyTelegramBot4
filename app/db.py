@@ -38,6 +38,14 @@ DEFAULT_MESSAGES = {
     "downloading": "⬇️ جاري التحميل...",
     "downloading_douyin": "⬇️ جاري التحميل بأعلى جودة...",
     "download_error": "صار خطأ بالتحميل ❌\n{error}",
+    "post_info_error": "صار خطأ بجلب معلومات المنشور ❌\n{error}",
+    "post_info_template": (
+        "ℹ️ *معلومات المنشور*\n"
+        "👤 الاسم: {uploader}\n"
+        "🔗 اليوزر: {handle}\n"
+        "📝 الوصف: {description}\n"
+        "{count_line}"
+    ),
     "quality_fetch_error": "ما گدرت اجيب معلومات الرابط ❌\n{error}",
     "expired_request": "انتهت صلاحية هذا الطلب، ارسل الرابط مرة اخرى 🔄",
     "platform_disabled": "التحميل من هذه المنصة متوقف حالياً 🚫",
