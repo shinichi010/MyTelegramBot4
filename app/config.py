@@ -27,6 +27,9 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # --- أقصى عدد خيارات جودة نعرضها لروابط اكس ---
 MAX_QUALITY_OPTIONS = 5
 
+# --- أقصى دقة (بكسل ارتفاع) نسمح بتحميلها/دمجها - سقف حماية ذاكرة ضد فيديوهات ضخمة (4K وأعلى) ---
+MAX_QUALITY_HEIGHT = int(os.environ.get("MAX_QUALITY_HEIGHT", "1080"))
+
 # --- آيدي التليگرام الرقمي حقك، يوصلك عليه إشعار كل مستخدم جديد يستخدم البوت ---
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "")
 
@@ -61,7 +64,7 @@ if DOUYIN_COOKIES_DATA:
         with open(DOUYIN_COOKIES_FILE, "wb") as f:
             f.write(base64.b64decode(DOUYIN_COOKIES_DATA))
     except Exception as e:
-        print(f"⚠️ فشل دويين: {e}")
+        print(f"⚠️ فشل فك تشفير كوكيز دويين: {e}")
         DOUYIN_COOKIES_FILE = None
 else:
     DOUYIN_COOKIES_FILE = None
@@ -76,7 +79,7 @@ if X_COOKIES_DATA:
         with open(X_COOKIES_FILE, "wb") as f:
             f.write(base64.b64decode(X_COOKIES_DATA))
     except Exception as e:
-        print(f"⚠️ فشل X: {e}")
+        print(f"⚠️ فشل فك تشفير كوكيز X: {e}")
         X_COOKIES_FILE = None
 else:
     X_COOKIES_FILE = None
@@ -91,7 +94,7 @@ if REDNOTE_COOKIES_DATA:
         with open(REDNOTE_COOKIES_FILE, "wb") as f:
             f.write(base64.b64decode(REDNOTE_COOKIES_DATA))
     except Exception as e:
-        print(f"⚠️ فشل RedNote: {e}")
+        print(f"⚠️ فشل فك تشفير كوكيز RedNote: {e}")
         REDNOTE_COOKIES_FILE = None
 else:
     REDNOTE_COOKIES_FILE = None
