@@ -123,6 +123,8 @@ async def list_qualities(url: str, platform: str = "x"):
         if f.get("vcodec") in (None, "none") or not f.get("height"):
             continue
         h = f["height"]
+        if h > config.MAX_QUALITY_HEIGHT:
+            continue  # سقف أقصى للجودة يمنع دمج فيديوهات ضخمة (4K وأعلى) تستهلك ذاكرة زايدة
         v_size = f.get("filesize") or f.get("filesize_approx") or 0
         has_audio = f.get("acodec") not in (None, "none")
         prev = by_height.get(h)
@@ -154,14 +156,12 @@ async def list_x_qualities(url: str):
 async def download_video(url: str, platform: str, height: int = 0) -> tuple[list[str], dict]:
     """يحمل كل فيديوهات/صور المنشور (وحدة او اكثر) بأقرب دقة ممكنة للدقة المختارة
     (height=0 يعني أفضل جودة متوفرة تلقائياً - مستخدم لكل المنصات غير X)."""
-    out_template = os.path.join(
-        config.DOWNLOAD_DIR, f"{uuid.uuid4()}_%(playlist_index)s.%(ext)s"
-    )
+    prefix = str(uuid.uuid4())
+    out_template = os.path.join(config.DOWNLOAD_DIR, f"{prefix}_%(playlist_index)s.%(ext)s")
 
-    if height and height > 0:
-        fmt = f"bv*[height<={height}]+ba/b[height<={height}]/best"
-    else:
-        fmt = "bv*+ba/best"
+    # نطبق سقف الدقة القصوى حتى بمسار "أفضل جودة متوفرة" - يمنع دمج فيديوهات 4K وأعلى
+    effective_height = height if (height and height > 0) else config.MAX_QUALITY_HEIGHT
+    fmt = f"bv*[height<={effective_height}]+ba/b[height<={effective_height}]/best"
 
     def _download():
         opts = _base_opts()
@@ -179,7 +179,11 @@ async def download_video(url: str, platform: str, height: int = 0) -> tuple[list
             files = [ydl.prepare_filename(e) for e in entries]
             return files, meta
 
-    files, meta = await asyncio.to_thread(_download)
+    try:
+        files, meta = await asyncio.to_thread(_download)
+    except Exception:
+        cleanup_by_prefix(prefix)  # ننظف اي ملفات جزئية/مؤقتة تركها الفشل (خصوصاً اثناء الدمج)
+        raise
     return _fix_extensions(files), meta
 
 
@@ -194,7 +198,8 @@ async def download_douyin(url: str) -> tuple[list[str], dict]:
 
 async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
     """يحمل الصوت بس (MP3) من اي منصة مدعومة، لكل الفيديوهات بالمنشور اذا اكثر من وحدة."""
-    out_template = os.path.join(config.DOWNLOAD_DIR, f"{uuid.uuid4()}_%(playlist_index)s.%(ext)s")
+    prefix = str(uuid.uuid4())
+    out_template = os.path.join(config.DOWNLOAD_DIR, f"{prefix}_%(playlist_index)s.%(ext)s")
 
     def _download():
         opts = _base_opts()
@@ -220,7 +225,11 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
                 files.append(base + ".mp3")
             return files, meta
 
-    files, meta = await asyncio.to_thread(_download)
+    try:
+        files, meta = await asyncio.to_thread(_download)
+    except Exception:
+        cleanup_by_prefix(prefix)
+        raise
     files = [f for f in files if os.path.exists(f)]
 
     # اسم عرض للملف مبني على اسم صاحب الحساب (نظافة الاسم من رموز ممنوعة بأسماء الملفات)
@@ -289,3 +298,17 @@ def cleanup(paths: list[str]):
             os.remove(p)
         except OSError:
             pass
+
+
+def cleanup_by_prefix(prefix: str):
+    """ينظف أي ملفات مؤقتة (كاملة او جزئية - .part, .ytdl, إلخ) تركها تحميل فاشل،
+    بالاعتماد على بادئة uuid الفريدة لهذا التحميل."""
+    try:
+        for fname in os.listdir(config.DOWNLOAD_DIR):
+            if fname.startswith(prefix):
+                try:
+                    os.remove(os.path.join(config.DOWNLOAD_DIR, fname))
+                except OSError:
+                    pass
+    except OSError:
+        pass
