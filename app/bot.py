@@ -62,6 +62,8 @@ EDITABLE_MESSAGES = {
     "downloading": "جاري التحميل (X)",
     "downloading_douyin": "جاري التحميل (دويين)",
     "download_error": "خطأ بالتحميل",
+    "post_info_error": "خطأ بمعلومات المنشور",
+    "post_info_template": "قالب معلومات المنشور",
     "quality_fetch_error": "خطأ بجلب الجودة",
     "expired_request": "انتهاء صلاحية الطلب",
     "platform_disabled": "منصة موقوفة",
@@ -69,6 +71,22 @@ EDITABLE_MESSAGES = {
     "maintenance_mode": "وضع الصيانة",
     "file_too_large": "الملف كبير جداً",
     "queue_wait": "انتظار بالطابور",
+}
+
+# شرح المتغيرات المتوفرة لكل رسالة قابلة للتعديل، يطلع للأدمن وقت التعديل
+MESSAGE_VARIABLE_HINTS = {
+    "post_info_template": (
+        "المتغيرات المتوفرة (لازم تخلي الأقواس المجعّدة `{}` كما هي):\n"
+        "• `{uploader}` — اسم صاحب الحساب\n"
+        "• `{handle}` — اليوزر (@username) او 'بدون يوزر' لو مو متوفر\n"
+        "• `{description}` — وصف المنشور (مختصر لحد 400 حرف)\n"
+        "• `{count_line}` — سطر عدد المقاطع/الصور (يظهر بس لو المنشور فيه اكثر من وحدة، خله بالمكان اللي تريده يطلع)\n\n"
+        "مثال: `👤 {uploader}\\n🔗 {handle}\\n📝 {description}`"
+    ),
+    "download_error": "المتغير المتوفر: `{error}` — نص الخطأ الفعلي من نظام التحميل.",
+    "post_info_error": "المتغير المتوفر: `{error}` — نص الخطأ الفعلي.",
+    "file_too_large": "المتغير المتوفر: `{max_size}` — الحد الأقصى المسموح بالميكابايت.",
+    "queue_wait": "المتغير المتوفر: `{position}` — رقم دور المستخدم بالطابور.",
 }
 
 # محادثة تعديل رسالة (أدمن فقط): user_id -> key الرسالة اللي ينتظر نصها الجديد
@@ -79,17 +97,27 @@ AWAITING_STICKER_EDIT: dict[int, str] = {}
 
 # محادثة تعديل حد رقمي (أدمن فقط): user_id -> اسم الإعداد
 AWAITING_LIMIT_EDIT: dict[int, str] = {}
+
+AUTODELETE_LABELS = {
+    "download_error": "رسالة خطأ التحميل",
+    "post_info_error": "رسالة خطأ معلومات المنشور",
+}
+
 LIMIT_LABELS = {
     "max_file_size_mb": "أقصى حجم ملف (ميكا)",
     "heavy_file_threshold_mb": "حد تفعيل الطابور (ميكا)",
     "main_ping_interval_min": "فاصل بينك البوت الرئيسي (دقايق)",
     "wechat_ping_interval_min": "فاصل بينك خدمة ويشات (دقايق)",
+    "download_error_autodelete_min": "مدة حذف رسالة خطأ التحميل",
+    "post_info_error_autodelete_min": "مدة حذف رسالة خطأ معلومات المنشور",
 }
 LIMIT_UNITS = {
     "max_file_size_mb": "ميكا",
     "heavy_file_threshold_mb": "ميكا",
     "main_ping_interval_min": "دقايق",
     "wechat_ping_interval_min": "دقايق",
+    "download_error_autodelete_min": "دقايق",
+    "post_info_error_autodelete_min": "دقايق",
 }
 
 STICKER_LABELS = {
@@ -388,6 +416,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 تفعيل/تعطيل البوت بالمجاميع", callback_data="adm:groups_toggle")],
         [InlineKeyboardButton("⚙️ حدود الأحجام (تحميل/طابور)", callback_data="adm:limits")],
         [InlineKeyboardButton("🛠️ وضع الصيانة (إيقاف الرد للمستخدمين)", callback_data="adm:maintenance_toggle")],
+        [InlineKeyboardButton("🗑️ حذف رسائل الخطأ تلقائياً", callback_data="adm:autodelete")],
         [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
     ]
     await update.message.reply_text(
@@ -418,11 +447,15 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         key = data.split(":", 2)[2]
         current = db.get_message(key)
         AWAITING_MESSAGE_EDIT[query.from_user.id] = key
+        var_hint = MESSAGE_VARIABLE_HINTS.get(
+            key,
+            "تكدر تستخدم `{error}` او `{max_size}` او `{position}` حسب نوع الرسالة، "
+            "خلهم كما هم لو ما تعرف وين تنحط."
+        )
         await query.edit_message_text(
             f"📝 النص الحالي لـ *{EDITABLE_MESSAGES.get(key, key)}*:\n\n"
             f"`{current}`\n\n"
-            "ارسل النص الجديد هسه كرسالة عادية (تكدر تستخدم `{error}` او `{max_size}` "
-            "او `{position}` حسب نوع الرسالة، خلهم كما هم لو ما تعرف وين تنحط).",
+            f"ارسل النص الجديد هسه كرسالة عادية.\n\n{var_hint}",
             parse_mode="Markdown",
         )
 
@@ -583,6 +616,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 تفعيل/تعطيل البوت بالمجاميع", callback_data="adm:groups_toggle")],
         [InlineKeyboardButton("⚙️ حدود الأحجام (تحميل/طابور)", callback_data="adm:limits")],
         [InlineKeyboardButton("🛠️ وضع الصيانة (إيقاف الرد للمستخدمين)", callback_data="adm:maintenance_toggle")],
+        [InlineKeyboardButton("🗑️ حذف رسائل الخطأ تلقائياً", callback_data="adm:autodelete")],
             [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
         ]
         await query.edit_message_text("🛠️ لوحة تحكم الأدمن", reply_markup=InlineKeyboardMarkup(buttons))
@@ -691,6 +725,47 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"وضع الصيانة صار: {new_state}\n\n"
             "ملاحظة: انت (الأدمن) تقدر تستخدم البوت عادي حتى وهو بوضع الصيانة.",
             reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:autodelete":
+        buttons = []
+        for key, label in AUTODELETE_LABELS.items():
+            enabled = db.get_setting(f"{key}_autodelete_enabled", False)
+            minutes = db.get_setting(f"{key}_autodelete_min", 5)
+            state = f"🟢 مفعّل ({minutes} دقيقة)" if enabled else "🔴 موقف"
+            buttons.append([InlineKeyboardButton(f"{label}: {state}", callback_data=f"adm:ad_toggle:{key}")])
+            buttons.append([InlineKeyboardButton(f"⏱️ عدل مدة {label}", callback_data=f"adm:ad_time:{key}")])
+        buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")])
+        await query.edit_message_text(
+            "تحكم بحذف رسائل الخطأ تلقائياً 👇", reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    elif data.startswith("adm:ad_toggle:"):
+        key = data.split(":", 2)[2]
+        current = db.get_setting(f"{key}_autodelete_enabled", False)
+        db.set_setting(f"{key}_autodelete_enabled", not current)
+        await query.answer("تم التغيير ✅")
+        # نرجع نبني نفس قائمة adm:autodelete محدثة
+        buttons = []
+        for k, label in AUTODELETE_LABELS.items():
+            enabled = db.get_setting(f"{k}_autodelete_enabled", False)
+            minutes = db.get_setting(f"{k}_autodelete_min", 5)
+            state = f"🟢 مفعّل ({minutes} دقيقة)" if enabled else "🔴 موقف"
+            buttons.append([InlineKeyboardButton(f"{label}: {state}", callback_data=f"adm:ad_toggle:{k}")])
+            buttons.append([InlineKeyboardButton(f"⏱️ عدل مدة {label}", callback_data=f"adm:ad_time:{k}")])
+        buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")])
+        await query.edit_message_text(
+            "تحكم بحذف رسائل الخطأ تلقائياً 👇", reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    elif data.startswith("adm:ad_time:"):
+        key = data.split(":", 2)[2]
+        current = db.get_setting(f"{key}_autodelete_min", 5)
+        AWAITING_LIMIT_EDIT[query.from_user.id] = f"{key}_autodelete_min"
+        await query.edit_message_text(
+            f"المدة الحالية لحذف *{AUTODELETE_LABELS[key]}*: {current} دقيقة\n\n"
+            "ارسل عدد الدقايق الجديد هسه.",
+            parse_mode="Markdown",
         )
 
 
@@ -880,14 +955,33 @@ def _retry_keyboard(url: str, platform: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("🔄 أعد المحاولة", callback_data=f"retry:{retry_id}")]])
 
 
+async def _schedule_auto_delete(context, chat_id: int, message_id: int, setting_key: str):
+    """يجدول حذف رسالة تلقائياً بعد المدة المحددة بـ /admin (بالدقايق)، اذا الميزة مفعّلة."""
+    enabled = db.get_setting(f"{setting_key}_autodelete_enabled", False)
+    if not enabled:
+        return
+    minutes = int(db.get_setting(f"{setting_key}_autodelete_min", 5))
+
+    async def _delete_later():
+        await asyncio.sleep(max(minutes, 1) * 60)
+        try:
+            await context.bot.delete_message(chat_id, message_id)
+        except Exception:
+            pass  # ممكن الرسالة تكون انحذفت او تغيرت يدوياً - عادي نتجاهل
+
+    asyncio.create_task(_delete_later())
+
+
 async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str):
     """يعرض رسالة الخطأ مع زر إعادة المحاولة. يحاول يعدل رسالة موجودة، وإلا يرسل وحدة جديدة."""
     text = db.get_message("download_error", error=error)
     keyboard = _retry_keyboard(url, platform)
     try:
         await msg.edit_text(text, reply_markup=keyboard)
+        sent = msg
     except Exception:
-        await context.bot.send_message(chat_id, text, reply_markup=keyboard)
+        sent = await context.bot.send_message(chat_id, text, reply_markup=keyboard)
+    await _schedule_auto_delete(context, chat_id, sent.message_id, "download_error")
 
 
 async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -934,19 +1028,40 @@ def _escape_md(text: str) -> str:
 def _build_info_caption(meta: dict, count: int) -> str:
     uploader = _escape_md(meta.get("uploader") or "غير معروف")
     uploader_id = meta.get("uploader_id")
-    handle = f"@{_escape_md(uploader_id)}" if uploader_id else ""
+    handle = f"@{_escape_md(uploader_id)}" if uploader_id else "بدون يوزر"
     description = meta.get("description") or "بدون وصف"
     if len(description) > 400:
         description = description[:400] + "..."
     description = _escape_md(description)
+    count_line = f"🎞️ عدد المقاطع/الصور: {count}" if count > 1 else ""
 
-    lines = ["ℹ️ *معلومات المنشور*", f"👤 الاسم: {uploader}"]
-    if handle:
-        lines.append(f"🔗 اليوزر: {handle}")
-    lines.append(f"📝 الوصف: {description}")
-    if count > 1:
-        lines.append(f"🎞️ عدد المقاطع/الصور: {count}")
-    return "\n".join(lines)
+    return db.get_message(
+        "post_info_template",
+        uploader=uploader,
+        handle=handle,
+        description=description,
+        count=count,
+        count_line=count_line,
+    ).strip()
+
+
+async def _send_post_info(context, chat_id: int, user_id: int, meta: dict, count: int, reply_markup=None):
+    """يبني ويرسل رسالة معلومات المنشور، مع رسالة خطأ منفصلة وحذف تلقائي اذا فشل التنسيق."""
+    if not _post_info_enabled(user_id):
+        if reply_markup:
+            # لسا لازم نرسل الأزرار (مثل زر الصوت) حتى لو المعلومات موقفة
+            sent = await context.bot.send_message(chat_id, "✅ تم", reply_markup=reply_markup)
+        return
+    try:
+        caption = _build_info_caption(meta, count)
+        sent = await context.bot.send_message(
+            chat_id, caption, parse_mode="Markdown", reply_markup=reply_markup
+        )
+    except Exception as e:
+        logger.exception("failed to send post info caption")
+        text = db.get_message("post_info_error", error=str(e))
+        sent = await context.bot.send_message(chat_id, text, reply_markup=reply_markup)
+        await _schedule_auto_delete(context, chat_id, sent.message_id, "post_info_error")
 
 
 def _check_size_ok(files: list[str]) -> bool:
@@ -1067,10 +1182,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
             "🎵 حمل الصوت بس (MP3)", callback_data=f"aud:{platform}:{req_id}"
         )]])
-        caption = _build_info_caption(meta, len(files)) if _post_info_enabled(update.effective_user.id) else "✅ تم"
-        await context.bot.send_message(
-            chat_id, caption, parse_mode="Markdown", reply_markup=audio_btn,
-        )
+        await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files), reply_markup=audio_btn)
         _record_download_success(platform)
     except Exception as e:
         logger.exception(f"{platform} download failed")
@@ -1112,10 +1224,7 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
             raise
         await _resolve_upload_sticker_success(sticker_msg)
 
-        if _post_info_enabled(update.effective_user.id):
-            await context.bot.send_message(
-                chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
-            )
+        await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
         _record_download_success("wechat")
     except Exception as e:
         logger.exception("wechat download failed")
@@ -1177,10 +1286,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             raise
         await _resolve_upload_sticker_success(sticker_msg)
 
-        if _post_info_enabled(update.effective_user.id):
-            await context.bot.send_message(
-                chat_id, _build_info_caption(meta, len(files)), parse_mode="Markdown"
-            )
+        await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
         _record_download_success(platform)
     except Exception as e:
         logger.exception(f"{platform} download failed")
