@@ -253,6 +253,7 @@ async def _notify_admin_if_new(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _clear_awaiting_states(update.effective_user.id)
     await _notify_admin_if_new(update, context)
 
     # دعم Deep Link: t.me/البوت?start=رابط_مشفر_base64 يبدأ التحميل تلقائياً
@@ -290,6 +291,7 @@ def build_deep_link(bot_username: str, url: str) -> str:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _clear_awaiting_states(update.effective_user.id)
     text = (
         "📖 *الأوامر المتوفرة*\n\n"
         "/start — رسالة الترحيب وشرح المنصات المدعومة\n"
@@ -314,6 +316,7 @@ async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """أمر أدمن: يبني رابط Deep Link جاهز من رابط منصة عادي، للاستخدام بموقع/تطبيق خارجي."""
     if not _is_admin(update.effective_user.id):
         return
+    _clear_awaiting_states(update.effective_user.id)
     if not context.args:
         await update.message.reply_text(
             "استخدم: /deeplink <رابط>\n"
@@ -331,14 +334,20 @@ async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """يلغي اي محادثة تعديل معلقة (رسالة/ستيكر/حد رقمي) عالقة بانتظار نص من الأدمن."""
-    user_id = update.effective_user.id
-    was_waiting = (
+def _clear_awaiting_states(user_id: int) -> bool:
+    """يمسح اي حالة انتظار تعديل معلقة (رسالة/ستيكر/حد رقمي) لهذا المستخدم.
+    يرجع True لو كان فيه حالة انتظار فعلاً. تُستدعى بأول كل أمر (/command) حتى
+    اي أمر يقطع تلقائياً اي تعديل معلق بدل ما ينحفظ نص الأمر نفسه بالغلط."""
+    return (
         AWAITING_MESSAGE_EDIT.pop(user_id, None) is not None
         or AWAITING_STICKER_EDIT.pop(user_id, None) is not None
         or AWAITING_LIMIT_EDIT.pop(user_id, None) is not None
     )
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يلغي اي محادثة تعديل معلقة (رسالة/ستيكر/حد رقمي) عالقة بانتظار نص من الأدمن."""
+    was_waiting = _clear_awaiting_states(update.effective_user.id)
     if was_waiting:
         await update.message.reply_text("✅ تم إلغاء العملية المعلقة.")
     else:
@@ -348,6 +357,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """إحصائيات شخصية للمستخدم نفسه - كم رابط حمّل ومن اي منصة + إعداداته الشخصية."""
     user = update.effective_user
+    _clear_awaiting_states(user.id)
     text, markup = _build_stats_view(user.id)
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
 
@@ -419,6 +429,7 @@ async def handle_pref_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(update.effective_user.id):
         return
+    _clear_awaiting_states(update.effective_user.id)
 
     buttons = [
         [InlineKeyboardButton("✏️ تعديل الرسائل", callback_data="adm:msgs")],
@@ -801,6 +812,7 @@ async def admin_callback_refresh_platforms(query):
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(update.effective_user.id):
         return
+    _clear_awaiting_states(update.effective_user.id)
     if not context.args:
         await update.message.reply_text("استخدم: /ban <آيدي المستخدم>")
         return
@@ -816,6 +828,7 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_admin(update.effective_user.id):
         return
+    _clear_awaiting_states(update.effective_user.id)
     if not context.args:
         await update.message.reply_text("استخدم: /unban <آيدي المستخدم>")
         return
@@ -843,9 +856,15 @@ async def handle_admin_sticker(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    raw_text = update.message.text or ""
+
+    # طبقة حماية إضافية: أي نص يبدأ بـ / (أمر) ما ينحفظ كقيمة تعديل معلقة إطلاقاً،
+    # حتى لو وصل لهذا المعالج بأي طريقة - نلغي الحالة المعلقة ونكمل معالجته كنص عادي
+    if raw_text.startswith("/"):
+        _clear_awaiting_states(user.id)
 
     # اذا الأدمن ينتظر منه نص تعديل رسالة
-    if _is_admin(user.id) and user.id in AWAITING_MESSAGE_EDIT:
+    elif _is_admin(user.id) and user.id in AWAITING_MESSAGE_EDIT:
         key = AWAITING_MESSAGE_EDIT.pop(user.id)
         new_text = update.message.text
         db.set_message(key, new_text)
@@ -853,7 +872,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # اذا الأدمن ينتظر منه رقم حد جديد (حجم ملف / حد الطابور / فاصل بينك)
-    if _is_admin(user.id) and user.id in AWAITING_LIMIT_EDIT:
+    elif _is_admin(user.id) and user.id in AWAITING_LIMIT_EDIT:
         key = AWAITING_LIMIT_EDIT.pop(user.id)
         try:
             new_value = int((update.message.text or "").strip())
