@@ -303,7 +303,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "▪️ اي فيديو تكدر تحمل الصوت بس منه (MP3) بزر منفصل."
     )
     if _is_admin(update.effective_user.id):
-        text += "\n\n🛠️ انت أدمن - استخدم /admin لفتح لوحة التحكم."
+        text += (
+            "\n\n🛠️ انت أدمن - استخدم /admin لفتح لوحة التحكم.\n"
+            "لو صارت عالق بمنتصف تعديل رسالة/ستيكر/حد رقمي وتريد تلغيه، استخدم /cancel."
+        )
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
@@ -326,6 +329,20 @@ async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "أي شخص يضغط عليه يفتح البوت ويبدأ التحميل تلقائياً.",
         parse_mode="Markdown",
     )
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يلغي اي محادثة تعديل معلقة (رسالة/ستيكر/حد رقمي) عالقة بانتظار نص من الأدمن."""
+    user_id = update.effective_user.id
+    was_waiting = (
+        AWAITING_MESSAGE_EDIT.pop(user_id, None) is not None
+        or AWAITING_STICKER_EDIT.pop(user_id, None) is not None
+        or AWAITING_LIMIT_EDIT.pop(user_id, None) is not None
+    )
+    if was_waiting:
+        await update.message.reply_text("✅ تم إلغاء العملية المعلقة.")
+    else:
+        await update.message.reply_text("ماكو عملية معلقة حالياً.")
 
 
 async def my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1362,6 +1379,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("stats", my_stats))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("deeplink", deeplink_command))
+    app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("ban", ban_command))
     app.add_handler(CommandHandler("unban", unban_command))
