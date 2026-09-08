@@ -56,6 +56,12 @@ DEFAULT_MESSAGES = {
         "⏳ حالياً اكو تحميل ثقيل شغال. انت رقمك {position} بالطابور.\n"
         "راح يبدأ تحميلك تلقائياً بعد ما يخلص اللي گبلك."
     ),
+    "fallback_retrying": "🔄 جاري إعادة المحاولة بطريقة بديلة...",
+    "fallback_failed": "❌ فشلت المحاولة البديلة بعد.\n{error}",
+    "fallback_limit_reached": (
+        "وصلت لحد المحاولات البديلة المسموحة هذا الأسبوع ({limit}). "
+        "حاول مرة اخرى الأسبوع الجاي 🔁"
+    ),
 }
 
 
@@ -311,6 +317,39 @@ def is_platform_disabled(platform: str) -> bool:
     if not is_connected():
         return False
     return _db.disabled_platforms.find_one({"platform": platform}) is not None
+
+
+# ---------- استهلاك المحاولة البديلة الأسبوعي (دويين عبر TikHub) ----------
+
+def _current_week_key() -> str:
+    """مفتاح الأسبوع الحالي بصيغة ISO (سنة-رقم أسبوع)، يستخدم لتصفير العداد تلقائياً كل أسبوع."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    iso = now.isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def get_douyin_fallback_usage(user_id: int) -> int:
+    """يرجع عدد مرات استخدام المحاولة البديلة لهذا المستخدم بالأسبوع الحالي."""
+    if not is_connected():
+        return 0
+    week_key = _current_week_key()
+    doc = _db.douyin_fallback_usage.find_one({"user_id": user_id, "week": week_key})
+    return doc.get("count", 0) if doc else 0
+
+
+def increment_douyin_fallback_usage(user_id: int) -> int:
+    """يزيد عداد استخدام المحاولة البديلة لهذا المستخدم بالأسبوع الحالي، يرجع العدد الجديد."""
+    if not is_connected():
+        return 0
+    week_key = _current_week_key()
+    doc = _db.douyin_fallback_usage.find_one_and_update(
+        {"user_id": user_id, "week": week_key},
+        {"$inc": {"count": 1}},
+        upsert=True,
+        return_document=True,
+    )
+    return doc.get("count", 1) if doc else 1
 
 
 # ---------- سجل الروابط ----------
