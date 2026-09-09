@@ -1032,7 +1032,7 @@ def _extract_all_links(text: str) -> list[tuple[str, str]]:
     return results
 
 
-async def _process_single_link(update, context, user, platform: str, url: str):
+async def _process_single_link(update, context, user, platform: str, url: str, fail_count: int = 0):
     if platform == "wechat":
         if db.is_platform_disabled("wechat"):
             await update.message.reply_text(db.get_message("platform_disabled"))
@@ -1042,7 +1042,7 @@ async def _process_single_link(update, context, user, platform: str, url: str):
             return
         if not _is_admin(user.id):
             db.log_link(user.id, user.username or "", "wechat", url)
-        await _handle_wechat(update, context, url)
+        await _handle_wechat(update, context, url, fail_count)
         return
 
     if db.is_platform_disabled(platform):
@@ -1075,21 +1075,28 @@ async def _process_single_link(update, context, user, platform: str, url: str):
                 pass  # المعاينة اختيارية - ما نوقف التحميل لو فشلت
 
     if platform in downloader.QUALITY_CHOICE_PLATFORMS:
-        await _handle_x(update, context, url, platform)
+        await _handle_x(update, context, url, platform, fail_count)
     else:
-        await _handle_auto_download(update, context, url, platform)
+        await _handle_auto_download(update, context, url, platform, fail_count)
 
 
-# تخزين مؤقت: retry_id قصير -> (url, platform) لزر "أعد المحاولة" / "محاولة بديلة"
-RETRY_PENDING: dict[str, tuple[str, str]] = {}
+# تخزين مؤقت: retry_id قصير -> (url, platform, fail_count) لزر "أعد المحاولة" / "محاولة بديلة"
+RETRY_PENDING: dict[str, tuple[str, str, int]] = {}
 
 
-def _retry_keyboard(url: str, platform: str) -> InlineKeyboardMarkup:
+def _retry_keyboard(url: str, platform: str, fail_count: int = 1) -> InlineKeyboardMarkup:
+    """يبني كيبورد زر إعادة المحاولة. زر 'محاولة بديلة' يطلع بس بعد فشلتين متتاليتين
+    فأكثر لنفس الرابط (fail_count >= 2) - أول فشل يطلع بس زرين (أعد المحاولة / إلغاء)."""
     retry_id = uuid.uuid4().hex[:10]
-    RETRY_PENDING[retry_id] = (url, platform)
+    RETRY_PENDING[retry_id] = (url, platform, fail_count)
     buttons = [[InlineKeyboardButton("🔄 أعد المحاولة", callback_data=f"retry:{retry_id}")]]
 
-    if platform == "douyin" and tikhub.is_configured() and db.get_setting("douyin_fallback_enabled", True):
+    if (
+        fail_count >= 2
+        and platform == "douyin"
+        and tikhub.is_configured()
+        and db.get_setting("douyin_fallback_enabled", True)
+    ):
         buttons.append([InlineKeyboardButton("🔀 محاولة بديلة", callback_data=f"fallback:{retry_id}")])
 
     buttons.append([InlineKeyboardButton("❌ إلغاء العملية", callback_data=f"cancelop:{retry_id}")])
@@ -1125,10 +1132,10 @@ async def _schedule_auto_delete_seconds(context, chat_id: int, message_id: int, 
     asyncio.create_task(_delete_later())
 
 
-async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str):
+async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1):
     """يعرض رسالة الخطأ مع زر إعادة المحاولة. يحاول يعدل رسالة موجودة، وإلا يرسل وحدة جديدة."""
     text = db.get_message("download_error", error=error)
-    keyboard = _retry_keyboard(url, platform)
+    keyboard = _retry_keyboard(url, platform, fail_count)
     try:
         await msg.edit_text(text, reply_markup=keyboard)
         sent = msg
@@ -1151,7 +1158,7 @@ async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(db.get_message("expired_request"))
         return
 
-    url, platform = pending
+    url, platform, fail_count = pending
     user = query.from_user
     chat_id = query.message.chat_id
 
@@ -1168,7 +1175,7 @@ async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         effective_chat=query.message.chat,
         callback_query=None,
     )
-    await _process_single_link(fake_update, context, user, platform, url)
+    await _process_single_link(fake_update, context, user, platform, url, fail_count)
 
 
 async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1186,7 +1193,7 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(db.get_message("expired_request"))
         return
 
-    url, platform = pending
+    url, platform, _fail_count = pending
     user = query.from_user
     chat_id = query.message.chat_id
 
@@ -1362,7 +1369,7 @@ async def _resolve_upload_sticker_error(context: ContextTypes.DEFAULT_TYPE, chat
             logger.exception("failed to send error sticker")
 
 
-async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, platform: str = "x"):
+async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, platform: str = "x", fail_count: int = 0):
     msg = await update.message.reply_text(db.get_message("fetching_qualities"))
     try:
         meta, quality_options, count = await downloader.list_qualities(url, platform)
@@ -1396,8 +1403,9 @@ async def _handle_douyin(update: Update, context: ContextTypes.DEFAULT_TYPE, url
     await _handle_auto_download(update, context, url, "douyin")
 
 
-async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, platform: str):
-    """معالج عام للمنصات اللي تنزل تلقائياً بأعلى جودة بدون قائمة اختيار (دويين، RedNote، Bilibili)."""
+async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, platform: str, fail_count: int = 0):
+    """معالج عام للمنصات اللي تنزل تلقائياً بأعلى جودة بدون قائمة اختيار (دويين، RedNote، Bilibili).
+    fail_count: عدد الفشل المتتالي السابق لنفس الرابط - يحدد شنو الأزرار تطلع بحالة الفشل."""
     chat_id = update.effective_chat.id
     status_key = "downloading_douyin" if platform == "douyin" else "downloading"
     msg = await update.message.reply_text(db.get_message(status_key))
@@ -1408,7 +1416,9 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         files, meta = await downloader.download_video(url, platform, 0)
         if not files:
-            await _send_error_with_retry(context, chat_id, msg, "ما گدرت انزل هذا المنشور", url, platform)
+            await _send_error_with_retry(
+                context, chat_id, msg, "ما گدرت انزل هذا المنشور", url, platform, fail_count + 1
+            )
             return
 
         if not _check_size_ok(files):
@@ -1440,14 +1450,14 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
-        await _send_error_with_retry(context, chat_id, msg, str(e), url, platform)
+        await _send_error_with_retry(context, chat_id, msg, str(e), url, platform, fail_count + 1)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
             _release_heavy_slot()
 
 
-async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, fail_count: int = 0):
     chat_id = update.effective_chat.id
     msg = await update.message.reply_text("⬇️ جاري التحميل من ويشات...")
     await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
@@ -1482,7 +1492,7 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
     except Exception as e:
         logger.exception("wechat download failed")
         await _record_download_failure(context, "wechat", str(e))
-        await _send_error_with_retry(context, chat_id, msg, str(e), url, "wechat")
+        await _send_error_with_retry(context, chat_id, msg, str(e), url, "wechat", fail_count + 1)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
