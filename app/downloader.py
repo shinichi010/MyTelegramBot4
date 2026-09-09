@@ -241,7 +241,9 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
 
 
 async def verify_link(url: str, platform: str) -> bool:
-    """يتحقق ان الرابط شغال وقابل للوصول قبل لا نبدأ تحميل فعلي (بدون تحميل فعلي للملف)."""
+    """يتحقق ان الرابط شغال وقابل للوصول قبل لا نبدأ تحميل فعلي (بدون تحميل فعلي للملف).
+    يسوي محاولتين قبل ما يحكم "فشل" - بعض المنصات (خصوصاً دويين) تصير عندها
+    تذبذبات مؤقتة ترجع خطأ لحظي حتى لو الرابط شغال فعلاً."""
 
     def _check():
         opts = _base_opts()
@@ -253,6 +255,12 @@ async def verify_link(url: str, platform: str) -> bool:
         except Exception:
             return False
 
+    ok = await asyncio.to_thread(_check)
+    if ok:
+        return True
+
+    # محاولة ثانية بعد مهلة قصيرة - تتجنب الحكم بالفشل بسبب تذبذب لحظي
+    await asyncio.sleep(2)
     return await asyncio.to_thread(_check)
 
 
