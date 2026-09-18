@@ -105,3 +105,79 @@ def download_douyin_via_api(share_url: str) -> tuple[str, dict]:
         "webpage_url": share_url,
     }
     return path, meta
+
+
+def fetch_rednote_video_detail(share_text: str) -> dict:
+    """يستدعي TikHub App V2 لجلب تفاصيل فيديو RedNote من نص/رابط مشاركة مباشر."""
+    resp = requests.get(
+        f"{BASE_URL}/xiaohongshu/app_v2/get_video_note_detail",
+        headers=_tikhub_headers(),
+        params={"share_text": share_text},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _extract_rednote_media(detail: dict) -> dict:
+    """يستخرج رابط تحميل الفيديو الصافي ومعلومات صاحب المنشور من استجابة RedNote."""
+    data = detail.get("data", {})
+    note = data.get("note", data)  # بعض الاستجابات تجي مباشرة بدون مفتاح note
+
+    video = note.get("video", {})
+    download_url = video.get("masterUrl") or video.get("master_url")
+    if not download_url:
+        backup_urls = video.get("backupUrls") or video.get("backup_urls") or []
+        download_url = backup_urls[0] if backup_urls else None
+    if not download_url:
+        raise ValueError("ماكو رابط تحميل بهذا المنشور")
+
+    user = note.get("user", {})
+
+    return {
+        "download_url": download_url,
+        "uploader": user.get("nickname") or "",
+        "uploader_id": user.get("userId") or user.get("user_id") or "",
+        "description": note.get("desc") or note.get("title") or "",
+    }
+
+
+def download_rednote_via_api(share_url: str) -> tuple[str, dict]:
+    """يحمل فيديو RedNote كطريقة بديلة عبر TikHub، يرجع مسار الملف المحلي + معلومات صاحب المنشور."""
+    if not is_configured():
+        raise RuntimeError("TikHub غير مفعّل (ناقص TIKHUB_API_KEY)")
+
+    detail = fetch_rednote_video_detail(share_url)
+    media = _extract_rednote_media(detail)
+
+    path = os.path.join(config.DOWNLOAD_DIR, f"{uuid.uuid4()}_rednote_api.mp4")
+    with requests.get(media["download_url"], stream=True, timeout=60) as r:
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 256):
+                f.write(chunk)
+
+    meta = {
+        "uploader": media["uploader"],
+        "uploader_id": media["uploader_id"],
+        "description": media["description"],
+        "webpage_url": share_url,
+    }
+    return path, meta
+
+
+def get_daily_usage() -> dict | None:
+    """يرجع استهلاك اليوم الحالي من TikHub (عدد الطلبات والتكلفة)، او None اذا فشل."""
+    if not is_configured():
+        return None
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/user/get_user_daily_usage",
+            headers=_tikhub_headers(),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json().get("data", {})
+    except Exception:
+        logger.exception("failed to fetch TikHub daily usage")
+        return None
