@@ -74,6 +74,7 @@ EDITABLE_MESSAGES = {
     "fallback_retrying": "جاري إعادة المحاولة (محاولة بديلة)",
     "fallback_failed": "فشلت المحاولة البديلة",
     "fallback_limit_reached": "وصل حد المحاولة البديلة الأسبوعي",
+    "link_verify_failed": "فشل التحقق من الرابط",
 }
 
 # شرح المتغيرات المتوفرة لكل رسالة قابلة للتعديل، يطلع للأدمن وقت التعديل
@@ -92,6 +93,7 @@ MESSAGE_VARIABLE_HINTS = {
     "queue_wait": "المتغير المتوفر: `{position}` — رقم دور المستخدم بالطابور.",
     "fallback_failed": "المتغير المتوفر: `{error}` — نص الخطأ الفعلي.",
     "fallback_limit_reached": "المتغير المتوفر: `{limit}` — الحد الأسبوعي الحالي.",
+    "link_verify_failed": "المتغير المتوفر: `{url}` — الرابط اللي فشل التحقق منه.",
 }
 
 # محادثة تعديل رسالة (أدمن فقط): user_id -> key الرسالة اللي ينتظر نصها الجديد
@@ -117,6 +119,8 @@ LIMIT_LABELS = {
     "post_info_error_autodelete_min": "مدة حذف رسالة خطأ معلومات المنشور",
     "douyin_fallback_weekly_limit": "حد المحاولة البديلة الأسبوعي لكل مستخدم (دويين)",
     "fallback_failure_autodelete_sec": "مدة حذف رسالة فشل المحاولة البديلة",
+    "failure_alert_threshold": "عدد الفشل المتتالي قبل تنبيه الأدمن",
+    "rednote_fallback_weekly_limit": "حد المحاولة البديلة الأسبوعي لكل مستخدم (RedNote)",
 }
 LIMIT_UNITS = {
     "max_file_size_mb": "ميكا",
@@ -127,6 +131,8 @@ LIMIT_UNITS = {
     "post_info_error_autodelete_min": "دقايق",
     "douyin_fallback_weekly_limit": "محاولة/أسبوع",
     "fallback_failure_autodelete_sec": "ثانية",
+    "failure_alert_threshold": "حالة فشل",
+    "rednote_fallback_weekly_limit": "محاولة/أسبوع",
 }
 
 STICKER_LABELS = {
@@ -205,16 +211,46 @@ def _get_limit_value(key: str) -> int:
         "wechat_ping_interval_min": 10,
         "douyin_fallback_weekly_limit": 5,
         "fallback_failure_autodelete_sec": 15,
+        "failure_alert_threshold": 5,
+        "rednote_fallback_weekly_limit": 5,
     }
     return int(db.get_setting(key, defaults.get(key, 0)))
 
 
-FAILURE_ALERT_THRESHOLD = 5  # كم فشل متتالي لنفس المنصة قبل ما ننبه الأدمن
+def _build_fallback_menu_buttons(platform: str) -> list:
+    """يبني أزرار قائمة إعدادات المحاولة البديلة لمنصة معينة (دويين/RedNote).
+    مدة/تفعيل حذف رسالة الفشل مشتركة بين كل المنصات، والبقية لكل منصة لحالها."""
+    fb_enabled = db.get_setting(f"{platform}_fallback_enabled", True)
+    fail_del_enabled = db.get_setting("fallback_failure_autodelete_enabled", False)
+    weekly_key = f"{platform}_fallback_weekly_limit"
+    toggle_cb = "adm:rednote_fallback_toggle" if platform == "rednote" else "adm:fallback_toggle"
+    fail_del_cb = "adm:rednote_fallback_fail_del_toggle" if platform == "rednote" else "adm:fallback_fail_del_toggle"
+
+    return [
+        [InlineKeyboardButton(
+            f"🔀 المحاولة البديلة: {'🟢 مفعّلة' if fb_enabled else '🔴 موقفة'}",
+            callback_data=toggle_cb,
+        )],
+        [InlineKeyboardButton(
+            f"📅 {LIMIT_LABELS[weekly_key]}: {_get_limit_value(weekly_key)}",
+            callback_data=f"adm:limit_edit:{weekly_key}",
+        )],
+        [InlineKeyboardButton(
+            f"🗑️ حذف رسالة الفشل تلقائياً: {'🟢 مفعّل' if fail_del_enabled else '🔴 موقف'}",
+            callback_data=fail_del_cb,
+        )],
+        [InlineKeyboardButton(
+            f"⏱️ {LIMIT_LABELS['fallback_failure_autodelete_sec']}: {_get_limit_value('fallback_failure_autodelete_sec')} ثانية",
+            callback_data="adm:limit_edit:fallback_failure_autodelete_sec",
+        )],
+        [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
+    ]
 
 
 async def _record_download_failure(context: ContextTypes.DEFAULT_TYPE, platform: str, error: str):
     count = db.record_failure(platform)
-    if count == FAILURE_ALERT_THRESHOLD and config.ADMIN_CHAT_ID:
+    threshold = _get_limit_value("failure_alert_threshold")
+    if count == threshold and config.ADMIN_CHAT_ID:
         try:
             await context.bot.send_message(
                 config.ADMIN_CHAT_ID,
@@ -572,6 +608,15 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 text += "\n🌐 *TikHub*: تعذر جلب البيانات حالياً\n"
 
+            daily = tikhub.get_daily_usage()
+            if daily:
+                requests_today = daily.get("total_requests") or daily.get("requests") or "؟"
+                cost_today = daily.get("total_cost") or daily.get("cost")
+                text += f"📅 استهلاك اليوم: {requests_today} طلب"
+                if cost_today is not None:
+                    text += f" (${float(cost_today):.4f})"
+                text += "\n"
+
         # رابط Render (استهلاك RAM/المساحة ما يوصله البوت برمجياً)
         if config.RENDER_DASHBOARD_URL:
             text += f"\n☁️ استهلاك السيرفر (RAM/مساحة): [افتح لوحة Render]({config.RENDER_DASHBOARD_URL})"
@@ -727,7 +772,12 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🈶 بينك خدمة ويشات: {'🟢 مفعّل' if db.get_setting('wechat_ping_enabled', True) else '🔴 موقف'}",
                 callback_data="adm:wechat_ping_toggle",
             )],
+            [InlineKeyboardButton(
+                f"⚠️ {LIMIT_LABELS['failure_alert_threshold']}: {_get_limit_value('failure_alert_threshold')}",
+                callback_data="adm:limit_edit:failure_alert_threshold",
+            )],
             [InlineKeyboardButton("🔀 المحاولة البديلة (دويين)", callback_data="adm:fallback_menu")],
+            [InlineKeyboardButton("🔀 المحاولة البديلة (RedNote)", callback_data="adm:rednote_fallback_menu")],
             [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")],
         ]
         await query.edit_message_text(
@@ -735,59 +785,28 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "adm:fallback_menu":
-        fb_enabled = db.get_setting("douyin_fallback_enabled", True)
-        fail_del_enabled = db.get_setting("fallback_failure_autodelete_enabled", False)
-        buttons = [
-            [InlineKeyboardButton(
-                f"🔀 المحاولة البديلة: {'🟢 مفعّلة' if fb_enabled else '🔴 موقفة'}",
-                callback_data="adm:fallback_toggle",
-            )],
-            [InlineKeyboardButton(
-                f"📅 {LIMIT_LABELS['douyin_fallback_weekly_limit']}: {_get_limit_value('douyin_fallback_weekly_limit')}",
-                callback_data="adm:limit_edit:douyin_fallback_weekly_limit",
-            )],
-            [InlineKeyboardButton(
-                f"🗑️ حذف رسالة الفشل تلقائياً: {'🟢 مفعّل' if fail_del_enabled else '🔴 موقف'}",
-                callback_data="adm:fallback_fail_del_toggle",
-            )],
-            [InlineKeyboardButton(
-                f"⏱️ {LIMIT_LABELS['fallback_failure_autodelete_sec']}: {_get_limit_value('fallback_failure_autodelete_sec')} ثانية",
-                callback_data="adm:limit_edit:fallback_failure_autodelete_sec",
-            )],
-            [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
-        ]
+        buttons = _build_fallback_menu_buttons("douyin")
         await query.edit_message_text(
             "إعدادات المحاولة البديلة لدويين (عبر TikHub) 👇",
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
-    elif data == "adm:fallback_toggle":
-        current = db.get_setting("douyin_fallback_enabled", True)
-        db.set_setting("douyin_fallback_enabled", not current)
-        await query.answer("تم التغيير ✅")
-        fb_enabled = not current
-        fail_del_enabled = db.get_setting("fallback_failure_autodelete_enabled", False)
-        buttons = [
-            [InlineKeyboardButton(
-                f"🔀 المحاولة البديلة: {'🟢 مفعّلة' if fb_enabled else '🔴 موقفة'}",
-                callback_data="adm:fallback_toggle",
-            )],
-            [InlineKeyboardButton(
-                f"📅 {LIMIT_LABELS['douyin_fallback_weekly_limit']}: {_get_limit_value('douyin_fallback_weekly_limit')}",
-                callback_data="adm:limit_edit:douyin_fallback_weekly_limit",
-            )],
-            [InlineKeyboardButton(
-                f"🗑️ حذف رسالة الفشل تلقائياً: {'🟢 مفعّل' if fail_del_enabled else '🔴 موقف'}",
-                callback_data="adm:fallback_fail_del_toggle",
-            )],
-            [InlineKeyboardButton(
-                f"⏱️ {LIMIT_LABELS['fallback_failure_autodelete_sec']}: {_get_limit_value('fallback_failure_autodelete_sec')} ثانية",
-                callback_data="adm:limit_edit:fallback_failure_autodelete_sec",
-            )],
-            [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
-        ]
+    elif data == "adm:rednote_fallback_menu":
+        buttons = _build_fallback_menu_buttons("rednote")
         await query.edit_message_text(
-            "إعدادات المحاولة البديلة لدويين (عبر TikHub) 👇",
+            "إعدادات المحاولة البديلة لـ RedNote (عبر TikHub) 👇",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:fallback_toggle" or data == "adm:rednote_fallback_toggle":
+        platform = "rednote" if data == "adm:rednote_fallback_toggle" else "douyin"
+        current = db.get_setting(f"{platform}_fallback_enabled", True)
+        db.set_setting(f"{platform}_fallback_enabled", not current)
+        await query.answer("تم التغيير ✅")
+        label = "RedNote" if platform == "rednote" else "دويين"
+        buttons = _build_fallback_menu_buttons(platform)
+        await query.edit_message_text(
+            f"إعدادات المحاولة البديلة لـ{label} (عبر TikHub) 👇",
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -795,29 +814,19 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current = db.get_setting("fallback_failure_autodelete_enabled", False)
         db.set_setting("fallback_failure_autodelete_enabled", not current)
         await query.answer("تم التغيير ✅")
-        fb_enabled = db.get_setting("douyin_fallback_enabled", True)
-        fail_del_enabled = not current
-        buttons = [
-            [InlineKeyboardButton(
-                f"🔀 المحاولة البديلة: {'🟢 مفعّلة' if fb_enabled else '🔴 موقفة'}",
-                callback_data="adm:fallback_toggle",
-            )],
-            [InlineKeyboardButton(
-                f"📅 {LIMIT_LABELS['douyin_fallback_weekly_limit']}: {_get_limit_value('douyin_fallback_weekly_limit')}",
-                callback_data="adm:limit_edit:douyin_fallback_weekly_limit",
-            )],
-            [InlineKeyboardButton(
-                f"🗑️ حذف رسالة الفشل تلقائياً: {'🟢 مفعّل' if fail_del_enabled else '🔴 موقف'}",
-                callback_data="adm:fallback_fail_del_toggle",
-            )],
-            [InlineKeyboardButton(
-                f"⏱️ {LIMIT_LABELS['fallback_failure_autodelete_sec']}: {_get_limit_value('fallback_failure_autodelete_sec')} ثانية",
-                callback_data="adm:limit_edit:fallback_failure_autodelete_sec",
-            )],
-            [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
-        ]
+        buttons = _build_fallback_menu_buttons("douyin")
         await query.edit_message_text(
             "إعدادات المحاولة البديلة لدويين (عبر TikHub) 👇",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:rednote_fallback_fail_del_toggle":
+        current = db.get_setting("fallback_failure_autodelete_enabled", False)
+        db.set_setting("fallback_failure_autodelete_enabled", not current)
+        await query.answer("تم التغيير ✅")
+        buttons = _build_fallback_menu_buttons("rednote")
+        await query.edit_message_text(
+            "إعدادات المحاولة البديلة لـ RedNote (عبر TikHub) 👇",
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -1057,7 +1066,7 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
         ok = await downloader.verify_link(url, platform)
         await check_msg.delete()
         if not ok:
-            await update.message.reply_text(f"هذا الرابط ما يشتغل او غير متاح ❌\n{url}")
+            await update.message.reply_text(db.get_message("link_verify_failed", url=url))
             return
 
     if _preview_enabled(user.id):
@@ -1084,18 +1093,22 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
 RETRY_PENDING: dict[str, tuple[str, str, int]] = {}
 
 
+FALLBACK_CAPABLE_PLATFORMS = {"douyin", "rednote"}
+
+
 def _retry_keyboard(url: str, platform: str, fail_count: int = 1) -> InlineKeyboardMarkup:
     """يبني كيبورد زر إعادة المحاولة. زر 'محاولة بديلة' يطلع بس بعد فشلتين متتاليتين
-    فأكثر لنفس الرابط (fail_count >= 2) - أول فشل يطلع بس زرين (أعد المحاولة / إلغاء)."""
+    فأكثر لنفس الرابط (fail_count >= 2)، ولمنصة تدعم محاولة بديلة (دويين/RedNote) -
+    أول فشل يطلع بس زرين (أعد المحاولة / إلغاء)."""
     retry_id = uuid.uuid4().hex[:10]
     RETRY_PENDING[retry_id] = (url, platform, fail_count)
     buttons = [[InlineKeyboardButton("🔄 أعد المحاولة", callback_data=f"retry:{retry_id}")]]
 
     if (
         fail_count >= 2
-        and platform == "douyin"
+        and platform in FALLBACK_CAPABLE_PLATFORMS
         and tikhub.is_configured()
-        and db.get_setting("douyin_fallback_enabled", True)
+        and db.get_setting(f"{platform}_fallback_enabled", True)
     ):
         buttons.append([InlineKeyboardButton("🔀 محاولة بديلة", callback_data=f"fallback:{retry_id}")])
 
@@ -1178,8 +1191,14 @@ async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _process_single_link(fake_update, context, user, platform, url, fail_count)
 
 
+FALLBACK_DOWNLOAD_FUNCS = {
+    "douyin": "download_douyin_via_api",
+    "rednote": "download_rednote_via_api",
+}
+
+
 async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """يعالج زر 'محاولة بديلة' - يحمل عبر TikHub API بدل yt-dlp (حالياً دويين بس)."""
+    """يعالج زر 'محاولة بديلة' - يحمل عبر TikHub API بدل yt-dlp (دويين وRedNote)."""
     query = update.callback_query
     await query.answer()
 
@@ -1197,12 +1216,15 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     chat_id = query.message.chat_id
 
-    if not db.get_setting("douyin_fallback_enabled", True):
+    if platform not in FALLBACK_DOWNLOAD_FUNCS:
+        return
+
+    if not db.get_setting(f"{platform}_fallback_enabled", True):
         await query.answer("المحاولة البديلة موقفة حالياً 🚫", show_alert=True)
         return
 
-    weekly_limit = _get_limit_value("douyin_fallback_weekly_limit")
-    current_usage = db.get_douyin_fallback_usage(user.id)
+    weekly_limit = _get_limit_value(f"{platform}_fallback_weekly_limit")
+    current_usage = db.get_fallback_usage(user.id, platform)
     if current_usage >= weekly_limit:
         try:
             await query.message.delete()
@@ -1220,34 +1242,39 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status = await context.bot.send_message(chat_id, db.get_message("fallback_retrying"))
 
+    download_func = getattr(tikhub, FALLBACK_DOWNLOAD_FUNCS[platform])
+
     files = []
     try:
-        path, meta = await asyncio.to_thread(tikhub.download_douyin_via_api, url)
+        path, meta = await asyncio.to_thread(download_func, url)
         files = [path]
 
         if not _check_size_ok(files):
             await status.edit_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
             return
 
-        db.increment_douyin_fallback_usage(user.id)
+        db.increment_fallback_usage(user.id, platform)
         if not _is_admin(user.id):
-            db.log_link(user.id, user.username or "", "douyin", url)
+            db.log_link(user.id, user.username or "", platform, url)
 
         await status.delete()
 
-        sticker_msg = await _show_upload_sticker(context, chat_id, "douyin")
+        sticker_msg = await _show_upload_sticker(context, chat_id, platform)
         try:
             for path in files:
                 await _send_file(update, context, path)
         except Exception:
-            await _resolve_upload_sticker_error(context, chat_id, "douyin", sticker_msg)
+            await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
             raise
         await _resolve_upload_sticker_success(sticker_msg)
+        _record_download_success(platform)
 
-        await _send_post_info(context, chat_id, user.id, meta, len(files))
-        _record_download_success("douyin")
+        try:
+            await _send_post_info(context, chat_id, user.id, meta, len(files))
+        except Exception:
+            logger.exception("failed to send post info after successful fallback upload (ignored)")
     except Exception as e:
-        logger.exception("douyin fallback download failed")
+        logger.exception(f"{platform} fallback download failed")
         text = db.get_message("fallback_failed", error=str(e))
         try:
             await status.edit_text(text)
@@ -1445,8 +1472,11 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
             "🎵 حمل الصوت بس (MP3)", callback_data=f"aud:{platform}:{req_id}"
         )]])
-        await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files), reply_markup=audio_btn)
         _record_download_success(platform)
+        try:
+            await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files), reply_markup=audio_btn)
+        except Exception:
+            logger.exception("failed to send post info after successful auto-download (ignored)")
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
@@ -1486,9 +1516,12 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
             await _resolve_upload_sticker_error(context, chat_id, "wechat", sticker_msg)
             raise
         await _resolve_upload_sticker_success(sticker_msg)
-
-        await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
         _record_download_success("wechat")
+
+        try:
+            await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
+        except Exception:
+            logger.exception("failed to send post info after successful wechat upload (ignored)")
     except Exception as e:
         logger.exception("wechat download failed")
         await _record_download_failure(context, "wechat", str(e))
@@ -1548,9 +1581,12 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
             raise
         await _resolve_upload_sticker_success(sticker_msg)
-
-        await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
         _record_download_success(platform)
+
+        try:
+            await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
+        except Exception:
+            logger.exception("failed to send post info after successful upload (ignored)")
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
