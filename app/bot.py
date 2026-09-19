@@ -75,6 +75,7 @@ EDITABLE_MESSAGES = {
     "fallback_failed": "فشلت المحاولة البديلة",
     "fallback_limit_reached": "وصل حد المحاولة البديلة الأسبوعي",
     "link_verify_failed": "فشل التحقق من الرابط",
+    "fallback_confirm": "تأكيد استخدام المحاولة البديلة",
 }
 
 # شرح المتغيرات المتوفرة لكل رسالة قابلة للتعديل، يطلع للأدمن وقت التعديل
@@ -94,6 +95,7 @@ MESSAGE_VARIABLE_HINTS = {
     "fallback_failed": "المتغير المتوفر: `{error}` — نص الخطأ الفعلي.",
     "fallback_limit_reached": "المتغير المتوفر: `{limit}` — الحد الأسبوعي الحالي.",
     "link_verify_failed": "المتغير المتوفر: `{url}` — الرابط اللي فشل التحقق منه.",
+    "fallback_confirm": "المتغيرات المتوفرة: `{remaining}` — المحاولات المتبقية، `{limit}` — الحد الأسبوعي الكلي.",
 }
 
 # محادثة تعديل رسالة (أدمن فقط): user_id -> key الرسالة اللي ينتظر نصها الجديد
@@ -1066,7 +1068,10 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
         ok = await downloader.verify_link(url, platform)
         await check_msg.delete()
         if not ok:
-            await update.message.reply_text(db.get_message("link_verify_failed", url=url))
+            text = db.get_message("link_verify_failed", url=url)
+            keyboard = _retry_keyboard(url, platform, fail_count + 1)
+            sent = await update.message.reply_text(text, reply_markup=keyboard)
+            await _schedule_auto_delete(context, sent.chat_id, sent.message_id, "download_error")
             return
 
     if _preview_enabled(user.id):
@@ -1097,20 +1102,25 @@ FALLBACK_CAPABLE_PLATFORMS = {"douyin", "rednote"}
 
 
 def _retry_keyboard(url: str, platform: str, fail_count: int = 1) -> InlineKeyboardMarkup:
-    """يبني كيبورد زر إعادة المحاولة. زر 'محاولة بديلة' يطلع بس بعد فشلتين متتاليتين
-    فأكثر لنفس الرابط (fail_count >= 2)، ولمنصة تدعم محاولة بديلة (دويين/RedNote) -
-    أول فشل يطلع بس زرين (أعد المحاولة / إلغاء)."""
+    """يبني كيبورد الأزرار حسب عدد الفشل المتتالي لنفس الرابط:
+    - فشلة أولى: زرين (🔄 أعد المحاولة / ❌ إلغاء)
+    - فشلة ثانية فأكثر (بمنصة تدعم محاولة بديلة مفعّلة): زرين (🔀 محاولة بديلة / ❌ إلغاء) بدون زر إعادة المحاولة
+    - فشلة ثانية فأكثر (بمنصة ما تدعم محاولة بديلة): يبقى زر إعادة المحاولة + إلغاء"""
     retry_id = uuid.uuid4().hex[:10]
     RETRY_PENDING[retry_id] = (url, platform, fail_count)
-    buttons = [[InlineKeyboardButton("🔄 أعد المحاولة", callback_data=f"retry:{retry_id}")]]
 
-    if (
+    show_fallback = (
         fail_count >= 2
         and platform in FALLBACK_CAPABLE_PLATFORMS
         and tikhub.is_configured()
         and db.get_setting(f"{platform}_fallback_enabled", True)
-    ):
+    )
+
+    buttons = []
+    if show_fallback:
         buttons.append([InlineKeyboardButton("🔀 محاولة بديلة", callback_data=f"fallback:{retry_id}")])
+    else:
+        buttons.append([InlineKeyboardButton("🔄 أعد المحاولة", callback_data=f"retry:{retry_id}")])
 
     buttons.append([InlineKeyboardButton("❌ إلغاء العملية", callback_data=f"cancelop:{retry_id}")])
     return InlineKeyboardMarkup(buttons)
@@ -1196,9 +1206,12 @@ FALLBACK_DOWNLOAD_FUNCS = {
     "rednote": "download_rednote_via_api",
 }
 
+# تخزين مؤقت: confirm_id قصير -> (url, platform) لتأكيد استخدام المحاولة البديلة
+FALLBACK_CONFIRM_PENDING: dict[str, tuple[str, str]] = {}
+
 
 async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """يعالج زر 'محاولة بديلة' - يحمل عبر TikHub API بدل yt-dlp (دويين وRedNote)."""
+    """يعالج زر 'محاولة بديلة' - يعرض تأكيد أول (يوضح إنها مدفوعة مستقبلاً + عدد المحاولات المتبقية)."""
     query = update.callback_query
     await query.answer()
 
@@ -1214,7 +1227,6 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     url, platform, _fail_count = pending
     user = query.from_user
-    chat_id = query.message.chat_id
 
     if platform not in FALLBACK_DOWNLOAD_FUNCS:
         return
@@ -1225,15 +1237,65 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     weekly_limit = _get_limit_value(f"{platform}_fallback_weekly_limit")
     current_usage = db.get_fallback_usage(user.id, platform)
-    if current_usage >= weekly_limit:
+    remaining = max(weekly_limit - current_usage, 0)
+
+    if remaining <= 0:
         try:
             await query.message.delete()
         except Exception:
             pass
         await context.bot.send_message(
-            chat_id, db.get_message("fallback_limit_reached", limit=weekly_limit)
+            query.message.chat_id, db.get_message("fallback_limit_reached", limit=weekly_limit)
         )
         return
+
+    confirm_id = uuid.uuid4().hex[:10]
+    FALLBACK_CONFIRM_PENDING[confirm_id] = (url, platform)
+
+    text = db.get_message("fallback_confirm", remaining=remaining, limit=weekly_limit)
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ استخدم المحاولة", callback_data=f"fbconfirm:{confirm_id}")],
+        [InlineKeyboardButton("❌ إلغاء", callback_data=f"fbcancel:{confirm_id}")],
+    ])
+    try:
+        await query.edit_message_text(text, reply_markup=buttons)
+    except Exception:
+        await context.bot.send_message(query.message.chat_id, text, reply_markup=buttons)
+
+
+async def handle_fallback_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعالج زر 'إلغاء' برسالة تأكيد المحاولة البديلة."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        _, confirm_id = query.data.split(":", 1)
+    except ValueError:
+        return
+    FALLBACK_CONFIRM_PENDING.pop(confirm_id, None)
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
+
+async def handle_fallback_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعالج زر 'استخدم المحاولة' - ينفذ التحميل الفعلي عبر TikHub API."""
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        _, confirm_id = query.data.split(":", 1)
+    except ValueError:
+        return
+
+    pending = FALLBACK_CONFIRM_PENDING.pop(confirm_id, None)
+    if not pending:
+        await query.edit_message_text(db.get_message("expired_request"))
+        return
+
+    url, platform = pending
+    user = query.from_user
+    chat_id = query.message.chat_id
 
     try:
         await query.message.delete()
@@ -1671,6 +1733,8 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(handle_pref_toggle, pattern=r"^pref:"))
     app.add_handler(CallbackQueryHandler(handle_retry, pattern=r"^retry:"))
     app.add_handler(CallbackQueryHandler(handle_fallback, pattern=r"^fallback:"))
+    app.add_handler(CallbackQueryHandler(handle_fallback_confirm, pattern=r"^fbconfirm:"))
+    app.add_handler(CallbackQueryHandler(handle_fallback_cancel, pattern=r"^fbcancel:"))
     app.add_handler(CallbackQueryHandler(handle_cancel_op, pattern=r"^cancelop:"))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_admin_sticker))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
