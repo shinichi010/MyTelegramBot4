@@ -22,53 +22,142 @@ _client = None
 _db = None
 
 # --- الرسائل الافتراضية (تُستخدم أول مرة فقط، بعدها تنقرأ وتتعدل من القاعدة) ---
+# كل مفتاح فيه نسختين: ar (عربي) و en (إنكليزي)
 DEFAULT_MESSAGES = {
-    "welcome": (
-        "هلا والف هلا بيك 👋\n\n"
-        "ارسلي رابط فيديو من X ( تويتر )، دويين ( التيك توك الصيني )، ويشات ( WeChat )، "
-        "RedNote ( شياوخونغشو )، او Bilibili وراح أنزلك المحتوى.\n\n"
-        "💠 روابط X، RedNote، وBilibili: راح تطلع الك خيارات جودة (مع الحجم) تختار منها.\n"
-        "💠 روابط دويين وويشات: يتنزل تلقائياً بأعلى جودة متوفرة (فيديو او صور).\n\n"
-        "📊 ارسل /stats حتى تشوف إحصائياتك وتتحكم بإعداداتك الشخصية "
-        "(معلومات المنشور، التحقق من الرابط، المعاينة السريعة)."
-    ),
-    "unsupported_link": "بس روابط X، دويين، ويشات، RedNote، او Bilibili مدعومة حالياً 🙏",
-    "fetching_qualities": "🔍 اجيب خيارات الجودة...",
-    "choose_quality": "اختار الجودة اللي تريدها 👇",
-    "downloading": "⬇️ جاري التحميل...",
-    "downloading_douyin": "⬇️ جاري التحميل بأعلى جودة...",
-    "download_error": "صار خطأ بالتحميل ❌\n{error}",
-    "post_info_error": "صار خطأ بجلب معلومات المنشور ❌\n{error}",
-    "post_info_template": (
-        "ℹ️ *معلومات المنشور*\n"
-        "👤 الاسم: {uploader}\n"
-        "🔗 اليوزر: {handle}\n"
-        "📝 الوصف: {description}\n"
-        "{count_line}"
-    ),
-    "quality_fetch_error": "ما گدرت اجيب معلومات الرابط ❌\n{error}",
-    "expired_request": "انتهت صلاحية هذا الطلب، ارسل الرابط مرة اخرى 🔄",
-    "platform_disabled": "التحميل من هذه المنصة متوقف حالياً 🚫",
-    "user_banned": "ما تكدر تستخدم البوت حالياً 🚫",
-    "maintenance_mode": "🛠️ البوت تحت الصيانة حالياً، رجاءً حاول بعد شوي.",
-    "file_too_large": "الملف حجمه اكبر من {max_size} ميكا، ما يگدر البوت يرسله ❌",
-    "queue_wait": (
-        "⏳ حالياً اكو تحميل ثقيل شغال. انت رقمك {position} بالطابور.\n"
-        "راح يبدأ تحميلك تلقائياً بعد ما يخلص اللي گبلك."
-    ),
-    "fallback_retrying": "🔄 جاري إعادة المحاولة بطريقة بديلة...",
-    "fallback_failed": "❌ فشلت المحاولة البديلة بعد.\n{error}",
-    "fallback_limit_reached": (
-        "وصلت لحد المحاولات البديلة المسموحة هذا الأسبوع ({limit}). "
-        "حاول مرة اخرى الأسبوع الجاي 🔁"
-    ),
-    "link_verify_failed": "هذا الرابط ما يشتغل او غير متاح ❌\n{url}",
-    "fallback_confirm": (
-        "🔀 *المحاولة البديلة*\n\n"
-        "هذي الطريقة تشتغل 100%، بس راح تصير مدفوعة مستقبلاً.\n"
-        "عندك حالياً {remaining} من {limit} محاولة مجانية متبقية هذا الأسبوع.\n\n"
-        "تريد تستخدمها؟"
-    ),
+    "welcome": {
+        "ar": (
+            "هلا والف هلا بيك 👋\n\n"
+            "ارسلي رابط فيديو من X ( تويتر )، دويين ( التيك توك الصيني )، ويشات ( WeChat )، "
+            "RedNote ( شياوخونغشو )، او Bilibili وراح أنزلك المحتوى.\n\n"
+            "💠 روابط X، RedNote، وBilibili: راح تطلع الك خيارات جودة (مع الحجم) تختار منها.\n"
+            "💠 روابط دويين وويشات: يتنزل تلقائياً بأعلى جودة متوفرة (فيديو او صور).\n\n"
+            "📊 ارسل /stats حتى تشوف إحصائياتك وتتحكم بإعداداتك الشخصية "
+            "(معلومات المنشور، التحقق من الرابط، المعاينة السريعة)."
+        ),
+        "en": (
+            "Hey there 👋\n\n"
+            "Send me a video link from X (Twitter), Douyin (Chinese TikTok), WeChat Channels, "
+            "RedNote (Xiaohongshu), or Bilibili and I'll download it for you.\n\n"
+            "💠 X, RedNote, and Bilibili links: you'll get quality options (with size) to choose from.\n"
+            "💠 Douyin and WeChat links: downloaded automatically at the best available quality (video or photos).\n\n"
+            "📊 Send /stats to see your stats and control your personal settings "
+            "(post info, link verification, quick preview)."
+        ),
+    },
+    "unsupported_link": {
+        "ar": "بس روابط X، دويين، ويشات، RedNote، او Bilibili مدعومة حالياً 🙏",
+        "en": "Only X, Douyin, WeChat, RedNote, or Bilibili links are supported right now 🙏",
+    },
+    "fetching_qualities": {
+        "ar": "🔍 اجيب خيارات الجودة...",
+        "en": "🔍 Fetching quality options...",
+    },
+    "choose_quality": {
+        "ar": "اختار الجودة اللي تريدها 👇",
+        "en": "Choose the quality you want 👇",
+    },
+    "downloading": {
+        "ar": "⬇️ جاري التحميل...",
+        "en": "⬇️ Downloading...",
+    },
+    "downloading_douyin": {
+        "ar": "⬇️ جاري التحميل بأعلى جودة...",
+        "en": "⬇️ Downloading at the best quality...",
+    },
+    "download_error": {
+        "ar": "صار خطأ بالتحميل ❌\n{error}",
+        "en": "A download error occurred ❌\n{error}",
+    },
+    "post_info_error": {
+        "ar": "صار خطأ بجلب معلومات المنشور ❌\n{error}",
+        "en": "Failed to fetch post info ❌\n{error}",
+    },
+    "post_info_template": {
+        "ar": (
+            "ℹ️ *معلومات المنشور*\n"
+            "👤 الاسم: {uploader}\n"
+            "🔗 اليوزر: {handle}\n"
+            "📝 الوصف: {description}\n"
+            "{count_line}"
+        ),
+        "en": (
+            "ℹ️ *Post Info*\n"
+            "👤 Name: {uploader}\n"
+            "🔗 Handle: {handle}\n"
+            "📝 Description: {description}\n"
+            "{count_line}"
+        ),
+    },
+    "quality_fetch_error": {
+        "ar": "ما گدرت اجيب معلومات الرابط ❌\n{error}",
+        "en": "Couldn't fetch link info ❌\n{error}",
+    },
+    "expired_request": {
+        "ar": "انتهت صلاحية هذا الطلب، ارسل الرابط مرة اخرى 🔄",
+        "en": "This request has expired, please send the link again 🔄",
+    },
+    "platform_disabled": {
+        "ar": "التحميل من هذه المنصة متوقف حالياً 🚫",
+        "en": "Downloads from this platform are currently disabled 🚫",
+    },
+    "user_banned": {
+        "ar": "ما تكدر تستخدم البوت حالياً 🚫",
+        "en": "You can't use this bot right now 🚫",
+    },
+    "maintenance_mode": {
+        "ar": "🛠️ البوت تحت الصيانة حالياً، رجاءً حاول بعد شوي.",
+        "en": "🛠️ The bot is under maintenance right now, please try again shortly.",
+    },
+    "file_too_large": {
+        "ar": "الملف حجمه اكبر من {max_size} ميكا، ما يگدر البوت يرسله ❌",
+        "en": "The file is larger than {max_size} MB, the bot can't send it ❌",
+    },
+    "queue_wait": {
+        "ar": (
+            "⏳ حالياً اكو تحميل ثقيل شغال. انت رقمك {position} بالطابور.\n"
+            "راح يبدأ تحميلك تلقائياً بعد ما يخلص اللي گبلك."
+        ),
+        "en": (
+            "⏳ A heavy download is currently running. You're number {position} in the queue.\n"
+            "Your download will start automatically once the one before you finishes."
+        ),
+    },
+    "fallback_retrying": {
+        "ar": "🔄 جاري إعادة المحاولة بطريقة بديلة...",
+        "en": "🔄 Retrying with an alternative method...",
+    },
+    "fallback_failed": {
+        "ar": "❌ فشلت المحاولة البديلة بعد.\n{error}",
+        "en": "❌ The alternative method also failed.\n{error}",
+    },
+    "fallback_limit_reached": {
+        "ar": (
+            "وصلت لحد المحاولات البديلة المسموحة هذا الأسبوع ({limit}). "
+            "حاول مرة اخرى الأسبوع الجاي 🔁"
+        ),
+        "en": (
+            "You've reached this week's alternative-attempt limit ({limit}). "
+            "Try again next week 🔁"
+        ),
+    },
+    "link_verify_failed": {
+        "ar": "هذا الرابط ما يشتغل او غير متاح ❌\n{url}",
+        "en": "This link doesn't work or isn't available ❌\n{url}",
+    },
+    "fallback_confirm": {
+        "ar": (
+            "🔀 *المحاولة البديلة*\n\n"
+            "هذي الطريقة تشتغل 100%، بس راح تصير مدفوعة مستقبلاً.\n"
+            "عندك حالياً {remaining} من {limit} محاولة مجانية متبقية هذا الأسبوع.\n\n"
+            "تريد تستخدمها؟"
+        ),
+        "en": (
+            "🔀 *Alternative Method*\n\n"
+            "This method works 100%, but it will become paid in the future.\n"
+            "You currently have {remaining} of {limit} free attempts left this week.\n\n"
+            "Do you want to use it?"
+        ),
+    },
 }
 
 
@@ -92,11 +181,13 @@ def init():
     _db.disabled_platforms.create_index("platform", unique=True)
     _db.stickers.create_index("key", unique=True)
 
-    # نزرع الرسائل الافتراضية اذا مو موجودة
-    for key, text in DEFAULT_MESSAGES.items():
-        _db.messages.update_one(
-            {"key": key}, {"$setOnInsert": {"key": key, "text": text}}, upsert=True
-        )
+    # نزرع الرسائل الافتراضية اذا مو موجودة (نسخة لكل لغة تحت مفتاح key_lang)
+    for key, versions in DEFAULT_MESSAGES.items():
+        for lang, text in versions.items():
+            doc_key = f"{key}_{lang}"
+            _db.messages.update_one(
+                {"key": doc_key}, {"$setOnInsert": {"key": doc_key, "text": text}}, upsert=True
+            )
 
     logger.info("✅ اتصال MongoDB جاهز")
 
@@ -107,23 +198,37 @@ def is_connected() -> bool:
 
 # ---------- الرسائل ----------
 
-def get_message(key: str, **kwargs) -> str:
-    """يجيب رسالة من القاعدة (او الافتراضية اذا القاعدة غير متصلة) ويعبي المتغيرات."""
-    text = DEFAULT_MESSAGES.get(key, "")
+def get_message(key: str, lang: str = "ar", **kwargs) -> str:
+    """يجيب رسالة من القاعدة بلغة معينة (او الافتراضية اذا القاعدة غير متصلة) ويعبي المتغيرات.
+    lang: 'ar' او 'en'. اذا اللغة غير مدعومة لهذا المفتاح، يرجع بالعربي كافتراضي."""
+    if lang not in ("ar", "en"):
+        lang = "ar"
+
+    versions = DEFAULT_MESSAGES.get(key, {})
+    text = versions.get(lang) or versions.get("ar", "")
+
     if is_connected():
-        doc = _db.messages.find_one({"key": key})
+        doc = _db.messages.find_one({"key": f"{key}_{lang}"})
         if doc and doc.get("text"):
             text = doc["text"]
+        elif lang != "ar":
+            # اذا مو موجودة نسخة بهذي اللغة بالقاعدة، نرجع للعربي كافتراضي
+            doc_ar = _db.messages.find_one({"key": f"{key}_ar"})
+            if doc_ar and doc_ar.get("text"):
+                text = doc_ar["text"]
+
     try:
         return text.format(**kwargs) if kwargs else text
     except (KeyError, IndexError):
         return text
 
 
-def set_message(key: str, text: str) -> bool:
+def set_message(key: str, text: str, lang: str = "ar") -> bool:
     if not is_connected():
         return False
-    _db.messages.update_one({"key": key}, {"$set": {"text": text}}, upsert=True)
+    if lang not in ("ar", "en"):
+        lang = "ar"
+    _db.messages.update_one({"key": f"{key}_{lang}"}, {"$set": {"text": text}}, upsert=True)
     return True
 
 
@@ -278,6 +383,17 @@ def set_user_pref(user_id: int, key: str, value):
         return False
     _db.users.update_one({"user_id": user_id}, {"$set": {f"prefs.{key}": value}}, upsert=True)
     return True
+
+
+def get_user_language(user_id: int) -> str | None:
+    """يرجع لغة المستخدم المحفوظة ('ar' او 'en')، او None اذا ما اختار لغة بعد."""
+    return get_user_pref(user_id, "language", None)
+
+
+def set_user_language(user_id: int, lang: str):
+    if lang not in ("ar", "en"):
+        lang = "ar"
+    set_user_pref(user_id, "language", lang)
 
 
 # ---------- الحظر ----------
