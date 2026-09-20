@@ -35,8 +35,9 @@ async def _acquire_heavy_slot(update, context, chat_id: int):
     token = uuid.uuid4()
     _queue_waiters.append(token)
     position = len(_queue_waiters)
+    lang = _lang(update.effective_user.id)
     wait_msg = await context.bot.send_message(
-        chat_id, db.get_message("queue_wait", position=position)
+        chat_id, db.get_message("queue_wait", lang, position=position)
     )
 
     await _heavy_lock.acquire()
@@ -301,11 +302,16 @@ async def _notify_admin_if_new(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.exception("failed to notify admin about new user")
 
 
+def _lang(user_id: int) -> str:
+    """يجيب لغة المستخدم المحفوظة، افتراضياً عربي لو ما اختار بعد."""
+    return db.get_user_language(user_id) or "ar"
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _clear_awaiting_states(update.effective_user.id)
     await _notify_admin_if_new(update, context)
 
-    # دعم Deep Link: t.me/البوت?start=رابط_مشفر_base64 يبدأ التحميل تلقائياً
+    # دعم Deep Link: t.me/البوت?start=رابط_مشفر_base64 يبدأ التحميل تلقائياً (يتخطى اختيار اللغة)
     if context.args:
         url = _decode_deep_link(context.args[0])
         if url:
@@ -317,7 +323,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("رابط الـ Deep Link غير صالح، جرب ترسل الرابط مباشرة ❌")
         return
 
-    await update.message.reply_text(db.get_message("welcome"), parse_mode="Markdown")
+    # كل ضغطة /start تعرض اختيار اللغة أول، بعدها رسالة الترحيب باللغة المختارة
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇮🇶 العربية", callback_data="setlang:ar")],
+        [InlineKeyboardButton("🇬🇧 English", callback_data="setlang:en")],
+    ])
+    await update.message.reply_text(
+        "اختار لغة الواجهة:\nChoose interface language:",
+        reply_markup=buttons,
+    )
+
+
+async def handle_language_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        _, lang = query.data.split(":", 1)
+    except ValueError:
+        return
+
+    user_id = query.from_user.id
+    db.set_user_language(user_id, lang)
+
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
+    await context.bot.send_message(
+        query.message.chat_id, db.get_message("welcome", lang), parse_mode="Markdown"
+    )
 
 
 def _decode_deep_link(payload: str) -> str | None:
@@ -999,11 +1035,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _notify_admin_if_new(update, context)
 
     if db.is_banned(user.id):
-        await update.message.reply_text(db.get_message("user_banned"))
+        await update.message.reply_text(db.get_message("user_banned", _lang(user.id)))
         return
 
     if db.get_setting("maintenance_mode", False) and not _is_admin(user.id):
-        await update.message.reply_text(db.get_message("maintenance_mode"))
+        await update.message.reply_text(db.get_message("maintenance_mode", _lang(user.id)))
         return
 
     text = update.message.text or ""
@@ -1015,7 +1051,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not links:
         # بالمجاميع/القنوات نتجاهل الرسائل العادية بصمت حتى ما نزعج المحادثة
         if not is_group:
-            await update.message.reply_text(db.get_message("unsupported_link"))
+            await update.message.reply_text(db.get_message("unsupported_link", _lang(user.id)))
         return
 
     if is_group and db.get_setting("groups_enabled", True) is False:
@@ -1044,12 +1080,13 @@ def _extract_all_links(text: str) -> list[tuple[str, str]]:
 
 
 async def _process_single_link(update, context, user, platform: str, url: str, fail_count: int = 0):
+    lang = _lang(user.id)
     if platform == "wechat":
         if db.is_platform_disabled("wechat"):
-            await update.message.reply_text(db.get_message("platform_disabled"))
+            await update.message.reply_text(db.get_message("platform_disabled", lang))
             return
         if not wechat.is_configured():
-            await update.message.reply_text("تحميل ويشات مو مفعّل حالياً 🙏")
+            await update.message.reply_text("تحميل ويشات مو مفعّل حالياً 🙏" if lang == "ar" else "WeChat downloads aren't enabled right now 🙏")
             return
         if not _is_admin(user.id):
             db.log_link(user.id, user.username or "", "wechat", url)
@@ -1057,18 +1094,18 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
         return
 
     if db.is_platform_disabled(platform):
-        await update.message.reply_text(db.get_message("platform_disabled"))
+        await update.message.reply_text(db.get_message("platform_disabled", lang))
         return
 
     if not _is_admin(user.id):
         db.log_link(user.id, user.username or "", platform, url)
 
     if _verify_link_enabled(user.id):
-        check_msg = await update.message.reply_text("🔎 جاري التحقق من الرابط...")
+        check_msg = await update.message.reply_text("🔎 جاري التحقق من الرابط..." if lang == "ar" else "🔎 Verifying the link...")
         ok = await downloader.verify_link(url, platform)
         await check_msg.delete()
         if not ok:
-            text = db.get_message("link_verify_failed", url=url)
+            text = db.get_message("link_verify_failed", lang, url=url)
             keyboard = _retry_keyboard(url, platform, fail_count + 1)
             sent = await update.message.reply_text(text, reply_markup=keyboard)
             await _schedule_auto_delete(context, sent.chat_id, sent.message_id, "download_error")
@@ -1155,9 +1192,9 @@ async def _schedule_auto_delete_seconds(context, chat_id: int, message_id: int, 
     asyncio.create_task(_delete_later())
 
 
-async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1):
+async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1, lang: str = "ar"):
     """يعرض رسالة الخطأ مع زر إعادة المحاولة. يحاول يعدل رسالة موجودة، وإلا يرسل وحدة جديدة."""
-    text = db.get_message("download_error", error=error)
+    text = db.get_message("download_error", lang, error=error)
     keyboard = _retry_keyboard(url, platform, fail_count)
     try:
         await msg.edit_text(text, reply_markup=keyboard)
@@ -1178,7 +1215,7 @@ async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pending = RETRY_PENDING.pop(retry_id, None)
     if not pending:
-        await query.edit_message_text(db.get_message("expired_request"))
+        await query.edit_message_text(db.get_message("expired_request", _lang(query.from_user.id)))
         return
 
     url, platform, fail_count = pending
@@ -1214,6 +1251,7 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """يعالج زر 'محاولة بديلة' - يعرض تأكيد أول (يوضح إنها مدفوعة مستقبلاً + عدد المحاولات المتبقية)."""
     query = update.callback_query
     await query.answer()
+    lang = _lang(query.from_user.id)
 
     try:
         _, retry_id = query.data.split(":", 1)
@@ -1222,7 +1260,7 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pending = RETRY_PENDING.pop(retry_id, None)
     if not pending:
-        await query.edit_message_text(db.get_message("expired_request"))
+        await query.edit_message_text(db.get_message("expired_request", lang))
         return
 
     url, platform, _fail_count = pending
@@ -1232,7 +1270,8 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not db.get_setting(f"{platform}_fallback_enabled", True):
-        await query.answer("المحاولة البديلة موقفة حالياً 🚫", show_alert=True)
+        alert = "المحاولة البديلة موقفة حالياً 🚫" if lang == "ar" else "The alternative method is disabled right now 🚫"
+        await query.answer(alert, show_alert=True)
         return
 
     weekly_limit = _get_limit_value(f"{platform}_fallback_weekly_limit")
@@ -1245,17 +1284,19 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         await context.bot.send_message(
-            query.message.chat_id, db.get_message("fallback_limit_reached", limit=weekly_limit)
+            query.message.chat_id, db.get_message("fallback_limit_reached", lang, limit=weekly_limit)
         )
         return
 
     confirm_id = uuid.uuid4().hex[:10]
     FALLBACK_CONFIRM_PENDING[confirm_id] = (url, platform)
 
-    text = db.get_message("fallback_confirm", remaining=remaining, limit=weekly_limit)
+    text = db.get_message("fallback_confirm", lang, remaining=remaining, limit=weekly_limit)
+    use_label = "✅ استخدم المحاولة" if lang == "ar" else "✅ Use this method"
+    cancel_label = "❌ إلغاء" if lang == "ar" else "❌ Cancel"
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ استخدم المحاولة", callback_data=f"fbconfirm:{confirm_id}")],
-        [InlineKeyboardButton("❌ إلغاء", callback_data=f"fbcancel:{confirm_id}")],
+        [InlineKeyboardButton(use_label, callback_data=f"fbconfirm:{confirm_id}")],
+        [InlineKeyboardButton(cancel_label, callback_data=f"fbcancel:{confirm_id}")],
     ])
     try:
         await query.edit_message_text(text, reply_markup=buttons)
@@ -1288,9 +1329,10 @@ async def handle_fallback_confirm(update: Update, context: ContextTypes.DEFAULT_
     except ValueError:
         return
 
+    lang = _lang(query.from_user.id)
     pending = FALLBACK_CONFIRM_PENDING.pop(confirm_id, None)
     if not pending:
-        await query.edit_message_text(db.get_message("expired_request"))
+        await query.edit_message_text(db.get_message("expired_request", lang))
         return
 
     url, platform = pending
@@ -1302,7 +1344,7 @@ async def handle_fallback_confirm(update: Update, context: ContextTypes.DEFAULT_
     except Exception:
         pass
 
-    status = await context.bot.send_message(chat_id, db.get_message("fallback_retrying"))
+    status = await context.bot.send_message(chat_id, db.get_message("fallback_retrying", lang))
 
     download_func = getattr(tikhub, FALLBACK_DOWNLOAD_FUNCS[platform])
 
@@ -1312,7 +1354,7 @@ async def handle_fallback_confirm(update: Update, context: ContextTypes.DEFAULT_
         files = [path]
 
         if not _check_size_ok(files):
-            await status.edit_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
+            await status.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
 
         db.increment_fallback_usage(user.id, platform)
@@ -1337,7 +1379,7 @@ async def handle_fallback_confirm(update: Update, context: ContextTypes.DEFAULT_
             logger.exception("failed to send post info after successful fallback upload (ignored)")
     except Exception as e:
         logger.exception(f"{platform} fallback download failed")
-        text = db.get_message("fallback_failed", error=str(e))
+        text = db.get_message("fallback_failed", lang, error=str(e))
         try:
             await status.edit_text(text)
             fail_msg = status
@@ -1374,18 +1416,27 @@ def _escape_md(text: str) -> str:
     return text
 
 
-def _build_info_caption(meta: dict, count: int) -> str:
-    uploader = _escape_md(meta.get("uploader") or "غير معروف")
+def _build_info_caption(meta: dict, count: int, lang: str = "ar") -> str:
+    unknown = "غير معروف" if lang == "ar" else "Unknown"
+    no_handle = "بدون يوزر" if lang == "ar" else "no handle"
+    no_desc = "بدون وصف" if lang == "ar" else "no description"
+
+    uploader = _escape_md(meta.get("uploader") or unknown)
     uploader_id = meta.get("uploader_id")
-    handle = f"@{_escape_md(uploader_id)}" if uploader_id else "بدون يوزر"
-    description = meta.get("description") or "بدون وصف"
+    handle = f"@{_escape_md(uploader_id)}" if uploader_id else no_handle
+    description = meta.get("description") or no_desc
     if len(description) > 400:
         description = description[:400] + "..."
     description = _escape_md(description)
-    count_line = f"🎞️ عدد المقاطع/الصور: {count}" if count > 1 else ""
+
+    if count > 1:
+        count_line = f"🎞️ عدد المقاطع/الصور: {count}" if lang == "ar" else f"🎞️ Number of items: {count}"
+    else:
+        count_line = ""
 
     return db.get_message(
         "post_info_template",
+        lang,
         uploader=uploader,
         handle=handle,
         description=description,
@@ -1396,19 +1447,21 @@ def _build_info_caption(meta: dict, count: int) -> str:
 
 async def _send_post_info(context, chat_id: int, user_id: int, meta: dict, count: int, reply_markup=None):
     """يبني ويرسل رسالة معلومات المنشور، مع رسالة خطأ منفصلة وحذف تلقائي اذا فشل التنسيق."""
+    lang = _lang(user_id)
     if not _post_info_enabled(user_id):
         if reply_markup:
             # لسا لازم نرسل الأزرار (مثل زر الصوت) حتى لو المعلومات موقفة
-            sent = await context.bot.send_message(chat_id, "✅ تم", reply_markup=reply_markup)
+            done_text = "✅ تم" if lang == "ar" else "✅ Done"
+            sent = await context.bot.send_message(chat_id, done_text, reply_markup=reply_markup)
         return
     try:
-        caption = _build_info_caption(meta, count)
+        caption = _build_info_caption(meta, count, lang)
         sent = await context.bot.send_message(
             chat_id, caption, parse_mode="Markdown", reply_markup=reply_markup
         )
     except Exception as e:
         logger.exception("failed to send post info caption")
-        text = db.get_message("post_info_error", error=str(e))
+        text = db.get_message("post_info_error", lang, error=str(e))
         sent = await context.bot.send_message(chat_id, text, reply_markup=reply_markup)
         await _schedule_auto_delete(context, chat_id, sent.message_id, "post_info_error")
 
@@ -1459,31 +1512,38 @@ async def _resolve_upload_sticker_error(context: ContextTypes.DEFAULT_TYPE, chat
 
 
 async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, platform: str = "x", fail_count: int = 0):
-    msg = await update.message.reply_text(db.get_message("fetching_qualities"))
+    lang = _lang(update.effective_user.id)
+    msg = await update.message.reply_text(db.get_message("fetching_qualities", lang))
     try:
         meta, quality_options, count = await downloader.list_qualities(url, platform)
     except Exception as e:
         logger.exception(f"{platform} quality fetch failed")
-        await msg.edit_text(db.get_message("quality_fetch_error", error=str(e)))
+        await msg.edit_text(db.get_message("quality_fetch_error", lang, error=str(e)))
         return
 
     req_id = uuid.uuid4().hex[:10]
     PENDING[req_id] = (url, platform)
 
     buttons = []
+    best_label = "أفضل جودة متوفرة" if lang == "ar" else "Best available quality"
+    size_unit = "ميكا" if lang == "ar" else "MB"
     for h, size_bytes in quality_options:
-        label = f"{h}p" if h else "أفضل جودة متوفرة"
+        label = f"{h}p" if h else best_label
         if size_bytes:
             size_mb = size_bytes / (1024 * 1024)
-            label += f" - {size_mb:.1f} ميكا"
+            label += f" - {size_mb:.1f} {size_unit}"
         buttons.append([InlineKeyboardButton(
             label, callback_data=f"dl:{req_id}:{h}"
         )])
-    buttons.append([InlineKeyboardButton("🎵 صوت فقط (MP3)", callback_data=f"dl:{req_id}:audio")])
+    audio_label = "🎵 صوت فقط (MP3)" if lang == "ar" else "🎵 Audio only (MP3)"
+    buttons.append([InlineKeyboardButton(audio_label, callback_data=f"dl:{req_id}:audio")])
 
-    extra = f" (المنشور فيه {count} مقاطع/صور، راح تنزل كلهن)" if count > 1 else ""
+    if count > 1:
+        extra = f" (المنشور فيه {count} مقاطع/صور، راح تنزل كلهن)" if lang == "ar" else f" (this post has {count} items, all will be downloaded)"
+    else:
+        extra = ""
     await msg.edit_text(
-        db.get_message("choose_quality") + extra,
+        db.get_message("choose_quality", lang) + extra,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
@@ -1496,8 +1556,9 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     """معالج عام للمنصات اللي تنزل تلقائياً بأعلى جودة بدون قائمة اختيار (دويين، RedNote، Bilibili).
     fail_count: عدد الفشل المتتالي السابق لنفس الرابط - يحدد شنو الأزرار تطلع بحالة الفشل."""
     chat_id = update.effective_chat.id
+    lang = _lang(update.effective_user.id)
     status_key = "downloading_douyin" if platform == "douyin" else "downloading"
-    msg = await update.message.reply_text(db.get_message(status_key))
+    msg = await update.message.reply_text(db.get_message(status_key, lang))
     await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
 
     files = []
@@ -1505,13 +1566,14 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         files, meta = await downloader.download_video(url, platform, 0)
         if not files:
+            no_files_msg = "ما گدرت انزل هذا المنشور" if lang == "ar" else "Couldn't download this post"
             await _send_error_with_retry(
-                context, chat_id, msg, "ما گدرت انزل هذا المنشور", url, platform, fail_count + 1
+                context, chat_id, msg, no_files_msg, url, platform, fail_count + 1, lang
             )
             return
 
         if not _check_size_ok(files):
-            await msg.edit_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
+            await msg.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
 
         if _total_size(files) >= _heavy_threshold_bytes():
@@ -1532,7 +1594,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         req_id = uuid.uuid4().hex[:10]
         PENDING[f"audio_{platform}_{req_id}"] = url
         audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
-            "🎵 حمل الصوت بس (MP3)", callback_data=f"aud:{platform}:{req_id}"
+            "🎵 حمل الصوت بس (MP3)" if lang == "ar" else "🎵 Audio only (MP3)", callback_data=f"aud:{platform}:{req_id}"
         )]])
         _record_download_success(platform)
         try:
@@ -1542,7 +1604,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
-        await _send_error_with_retry(context, chat_id, msg, str(e), url, platform, fail_count + 1)
+        await _send_error_with_retry(context, chat_id, msg, str(e), url, platform, fail_count + 1, lang)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -1551,7 +1613,8 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, fail_count: int = 0):
     chat_id = update.effective_chat.id
-    msg = await update.message.reply_text("⬇️ جاري التحميل من ويشات...")
+    lang = _lang(update.effective_user.id)
+    msg = await update.message.reply_text("⬇️ جاري التحميل من ويشات..." if lang == "ar" else "⬇️ Downloading from WeChat...")
     await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
 
     files = []
@@ -1561,7 +1624,7 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
         files = [path]
 
         if not _check_size_ok(files):
-            await msg.edit_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
+            await msg.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
 
         if _total_size(files) >= _heavy_threshold_bytes():
@@ -1587,7 +1650,7 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
     except Exception as e:
         logger.exception("wechat download failed")
         await _record_download_failure(context, "wechat", str(e))
-        await _send_error_with_retry(context, chat_id, msg, str(e), url, "wechat", fail_count + 1)
+        await _send_error_with_retry(context, chat_id, msg, str(e), url, "wechat", fail_count + 1, lang)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -1597,22 +1660,23 @@ async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url
 async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    lang = _lang(query.from_user.id)
 
     try:
         _, req_id, choice = query.data.split(":", 2)
         is_audio = (choice == "audio")
         height = 0 if is_audio else int(choice)
     except ValueError:
-        await query.edit_message_text("طلب غير صالح ❌")
+        await query.edit_message_text("طلب غير صالح ❌" if lang == "ar" else "Invalid request ❌")
         return
 
     pending = PENDING.pop(req_id, None)
     if not pending:
-        await query.edit_message_text(db.get_message("expired_request"))
+        await query.edit_message_text(db.get_message("expired_request", lang))
         return
     url, platform = pending
 
-    await query.edit_message_text(db.get_message("downloading"))
+    await query.edit_message_text(db.get_message("downloading", lang))
     await context.bot.send_chat_action(query.message.chat_id, ChatAction.UPLOAD_VIDEO)
 
     chat_id = query.message.chat_id
@@ -1625,7 +1689,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             files, meta = await downloader.download_video(url, platform, height)
 
         if not _check_size_ok(files):
-            await query.edit_message_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
+            await query.edit_message_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
 
         if _total_size(files) >= _heavy_threshold_bytes():
@@ -1652,7 +1716,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
-        await _send_error_with_retry(context, chat_id, query.message, str(e), url, platform)
+        await _send_error_with_retry(context, chat_id, query.message, str(e), url, platform, lang=lang)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -1678,6 +1742,7 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
     """يعالج زر 'حمل الصوت بس' اللي يطلع بعد تحميل فيديو دويين."""
     query = update.callback_query
     await query.answer()
+    lang = _lang(query.from_user.id)
 
     try:
         _, platform, req_id = query.data.split(":", 2)
@@ -1686,17 +1751,17 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
 
     url = PENDING.pop(f"audio_{platform}_{req_id}", None)
     if not url:
-        await context.bot.send_message(query.message.chat_id, db.get_message("expired_request"))
+        await context.bot.send_message(query.message.chat_id, db.get_message("expired_request", lang))
         return
 
     chat_id = query.message.chat_id
-    status = await context.bot.send_message(chat_id, "🎵 جاري تحميل الصوت...")
+    status = await context.bot.send_message(chat_id, "🎵 جاري تحميل الصوت..." if lang == "ar" else "🎵 Downloading audio...")
 
     files = []
     try:
         files, meta = await downloader.download_audio(url, platform)
         if not files or not _check_size_ok(files):
-            await status.edit_text(db.get_message("file_too_large", max_size=_max_file_size_mb()))
+            await status.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
         await status.delete()
         display_name = meta.get("audio_display_name")
@@ -1704,7 +1769,7 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
             await _send_file(update, context, path, chat_id=chat_id, display_name=display_name)
     except Exception as e:
         logger.exception("audio download failed")
-        await status.edit_text(db.get_message("download_error", error=str(e)))
+        await status.edit_text(db.get_message("download_error", lang, error=str(e)))
     finally:
         downloader.cleanup(files)
 
@@ -1731,6 +1796,7 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(handle_quality_choice, pattern=r"^dl:"))
     app.add_handler(CallbackQueryHandler(handle_audio_request, pattern=r"^aud:"))
     app.add_handler(CallbackQueryHandler(handle_pref_toggle, pattern=r"^pref:"))
+    app.add_handler(CallbackQueryHandler(handle_language_choice, pattern=r"^setlang:"))
     app.add_handler(CallbackQueryHandler(handle_retry, pattern=r"^retry:"))
     app.add_handler(CallbackQueryHandler(handle_fallback, pattern=r"^fallback:"))
     app.add_handler(CallbackQueryHandler(handle_fallback_confirm, pattern=r"^fbconfirm:"))
