@@ -20,22 +20,22 @@ PAID_PLATFORMS = ("douyin", "rednote", "wechat")
 
 # ---------- الباقات الافتراضية (نجوم) ----------
 # تكلفتك التقريبية على TikHub: دويين ~0.001$، RedNote ~0.01$، ويشات ~0.01$ + استهلاك Render.
-# النجمة الواحدة تعطيك ~0.013$، فكل الباقات فيها هامش واضح. تعدلها من /admin بدون كود.
+# النجمة الواحدة تعطيك ~0.013$. الهامش المستهدف ~3-4 أضعاف الكلفة. تعدلها من /admin بدون كود.
 DEFAULT_PACKAGES = {
     "douyin": [
+        {"credits": 10, "stars": 3},
+        {"credits": 30, "stars": 8},
+        {"credits": 100, "stars": 25},
+    ],
+    "rednote": [
         {"credits": 10, "stars": 15},
         {"credits": 30, "stars": 40},
         {"credits": 100, "stars": 120},
     ],
-    "rednote": [
-        {"credits": 10, "stars": 30},
-        {"credits": 30, "stars": 80},
-        {"credits": 100, "stars": 240},
-    ],
     "wechat": [
-        {"credits": 10, "stars": 40},
-        {"credits": 30, "stars": 110},
-        {"credits": 100, "stars": 330},
+        {"credits": 10, "stars": 20},
+        {"credits": 30, "stars": 55},
+        {"credits": 100, "stars": 170},
     ],
 }
 
