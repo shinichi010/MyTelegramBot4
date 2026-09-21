@@ -192,7 +192,249 @@ DEFAULT_MESSAGES = {
         "ar": "تحميل ويشات مو مفعّل حالياً 🙏",
         "en": "WeChat downloads aren't enabled right now 🙏",
     },
+    # ============ المرحلة الثانية: نصوص كانت مدفونة بالكود ============
+    "help": {
+        "ar": (
+            "📖 *الأوامر المتوفرة*\n\n"
+            "/start — رسالة الترحيب وشرح المنصات المدعومة\n"
+            "/stats — إحصائياتك الشخصية + رصيدك + إعداداتك\n"
+            "/buy — شراء تحميلات بالنجوم ⭐\n"
+            "/help — هذي الرسالة\n\n"
+            "📎 *شلون تستخدم البوت*\n"
+            "بس ارسل رابط من X، دويين، ويشات، RedNote، او Bilibili — تقدر ترسل عدة "
+            "روابط بنفس الرسالة وراح انزلهن وحدة وحدة بالترتيب.\n\n"
+            "▪️ روابط X، RedNote، وBilibili: تطلع الك خيارات جودة مع الحجم تختار منها.\n"
+            "▪️ روابط دويين وويشات: تتنزل تلقائياً بأعلى جودة متوفرة.\n"
+            "▪️ اي فيديو تكدر تحمل الصوت بس منه (MP3) بزر منفصل."
+        ),
+        "en": (
+            "📖 *Available commands*\n\n"
+            "/start — Welcome message and supported platforms\n"
+            "/stats — Your personal stats + balance + settings\n"
+            "/buy — Buy downloads with Stars ⭐\n"
+            "/help — This message\n\n"
+            "📎 *How to use the bot*\n"
+            "Just send a link from X, Douyin, WeChat, RedNote, or Bilibili — you can send several "
+            "links in one message and I'll download them one by one in order.\n\n"
+            "▪️ X, RedNote and Bilibili links: you get quality options with sizes to choose from.\n"
+            "▪️ Douyin and WeChat links: downloaded automatically in the best available quality.\n"
+            "▪️ For any video you can download the audio only (MP3) with a separate button."
+        ),
+    },
+    "help_admin": {
+        "ar": "\n\n🛠️ انت أدمن - استخدم /admin لفتح لوحة التحكم.\nلو صارت عالق بمنتصف تعديل رسالة/ستيكر/حد رقمي وتريد تلغيه، استخدم /cancel.",
+        "en": "\n\n🛠️ You're an admin - use /admin to open the control panel.\nIf you get stuck in the middle of editing a message/sticker/limit, use /cancel.",
+    },
+    "deeplink_invalid": {
+        "ar": "رابط الـ Deep Link غير صالح، جرب ترسل الرابط مباشرة ❌",
+        "en": "The deep link is invalid, try sending the link directly ❌",
+    },
+    "cancel_done": {
+        "ar": "✅ تم إلغاء العملية المعلقة.",
+        "en": "✅ Pending operation cancelled.",
+    },
+    "cancel_none": {
+        "ar": "ماكو عملية معلقة حالياً.",
+        "en": "There's no pending operation.",
+    },
+    "multi_links": {
+        "ar": "📋 لقيت {count} روابط بالرسالة، راح انزلهن وحدة وحدة بالترتيب.",
+        "en": "📋 Found {count} links in the message, I'll download them one by one in order.",
+    },
+    "verifying_link": {
+        "ar": "🔎 جاري التحقق من الرابط...",
+        "en": "🔎 Verifying the link...",
+    },
+    "retrying": {
+        "ar": "🔄 جاري إعادة المحاولة...",
+        "en": "🔄 Retrying...",
+    },
+    "downloading_audio": {
+        "ar": "🎵 جاري تحميل الصوت...",
+        "en": "🎵 Downloading audio...",
+    },
+    "invalid_request": {
+        "ar": "طلب غير صالح ❌",
+        "en": "Invalid request ❌",
+    },
+    "no_files": {
+        "ar": "ما گدرت انزل هذا المنشور",
+        "en": "Couldn't download this post",
+    },
+    "post_info_disabled": {
+        "ar": "معلومات المنشور موقفة عام من الأدمن حالياً 🚫",
+        "en": "Post info is disabled globally by the admin right now 🚫",
+    },
+    "preview_disabled": {
+        "ar": "المعاينة السريعة موقفة عام من الأدمن حالياً 🚫",
+        "en": "Quick preview is disabled globally by the admin right now 🚫",
+    },
+    "fallback_disabled": {
+        "ar": "المحاولة البديلة موقفة حالياً 🚫",
+        "en": "The alternative method is disabled right now 🚫",
+    },
+    "fallback_admin": {
+        "ar": "🔀 *المحاولة البديلة*\n\nأنت أدمن: مجاني وما ينخصم منك شي ✅",
+        "en": "🔀 *Alternative method*\n\nYou're an admin: free, nothing is deducted ✅",
+    },
+    "low_balance_one": {
+        "ar": "ℹ️ باقي لك تحميل واحد بالمحاولة البديلة ({platform}).",
+        "en": "ℹ️ You have 1 alternative-method download left ({platform}).",
+    },
+    "low_balance_zero": {
+        "ar": "ℹ️ خلص رصيدك بالمحاولة البديلة ({platform}). تكدر تشتري تحميلات بـ /buy ⭐",
+        "en": "ℹ️ You're out of alternative-method downloads ({platform}). Use /buy to top up ⭐",
+    },
+    "stats_title": {
+        "ar": "📊 *إحصائياتك بالبوت*\n",
+        "en": "📊 *Your stats*\n",
+    },
+    "stats_no_downloads": {
+        "ar": "\nما عندك تحميلات مسجلة لحد هسه 📭",
+        "en": "\nNo downloads recorded yet 📭",
+    },
+    "stats_balance_title": {
+        "ar": "\n💼 *رصيد المحاولة البديلة*",
+        "en": "\n💼 *Alternative-method balance*",
+    },
+    "stats_balance_line": {
+        "ar": "  • {platform}: 🎁 {free} مجانية | 💎 {paid} مدفوعة",
+        "en": "  • {platform}: 🎁 {free} free | 💎 {paid} paid",
+    },
+    "shop_title": {
+        "ar": "🛒 *شراء تحميلات بالنجوم ⭐*",
+        "en": "🛒 *Buy downloads with Stars ⭐*",
+    },
+    "shop_pick_platform": {
+        "ar": "اختار المنصة 👇",
+        "en": "Choose a platform 👇",
+    },
+    "shop_platform_title": {
+        "ar": "📦 *باقات {platform}*",
+        "en": "📦 *{platform} packages*",
+    },
+    "shop_pick_package": {
+        "ar": "اختار الباقة 👇",
+        "en": "Choose a package 👇",
+    },
+    "shop_disabled": {
+        "ar": "🚫 الشراء متوقف حالياً.",
+        "en": "🚫 Purchases are currently disabled.",
+    },
+    "shop_invoice_error": {
+        "ar": "⚠️ تعذر إنشاء الفاتورة",
+        "en": "⚠️ Could not create invoice",
+    },
+    "invoice_title": {
+        "ar": "{credits} تحميل - {platform}",
+        "en": "{credits} downloads - {platform}",
+    },
+    "invoice_desc": {
+        "ar": "رصيد دائم: {credits} تحميل بالمحاولة البديلة لمنصة {platform}.",
+        "en": "Permanent credit: {credits} alternative-method downloads for {platform}.",
+    },
+    "pay_invalid_invoice": {
+        "ar": "فاتورة غير صالحة.",
+        "en": "Invalid invoice.",
+    },
+    "pay_platform_disabled": {
+        "ar": "الشراء متوقف حالياً لهذه المنصة.",
+        "en": "Purchases are disabled for this platform.",
+    },
+    "pay_price_changed": {
+        "ar": "تغير السعر، افتح المتجر من جديد.",
+        "en": "The price changed, please reopen the shop.",
+    },
+    "pay_unavailable": {
+        "ar": "الخدمة غير متاحة حالياً، حاول بعد شوي.",
+        "en": "Service unavailable, try again shortly.",
+    },
+    "pay_error": {
+        "ar": "صار خطأ، حاول مرة ثانية.",
+        "en": "Something went wrong, please try again.",
+    },
+    "pay_success": {
+        "ar": "✅ تم الدفع!\nأُضيف {credits} تحميل لرصيد {platform}.\n💎 رصيدك الحالي: {balance}",
+        "en": "✅ Payment successful!\n{credits} downloads added to your {platform} balance.\n💎 Current balance: {balance}",
+    },
+    "pay_unknown_payload": {
+        "ar": "تم استلام دفعتك، وراح نتواصل وياك لإضافة الرصيد. 🙏",
+        "en": "Payment received, we'll contact you to add your credit. 🙏",
+    },
+    "refund_user_notice": {
+        "ar": "💸 تم استرجاع نجومك لعملية شراء. لأي استفسار: /paysupport",
+        "en": "💸 Your Stars for a purchase were refunded. Questions: /paysupport",
+    },
+    "gift_user_notice": {
+        "ar": "🎁 وصلتك هدية: {credits} تحميل بالمحاولة البديلة ({platform})!",
+        "en": "🎁 You received a gift: {credits} alternative-method downloads ({platform})!",
+    },
+    # أزرار (تنعدل من الأدمن مثل باقي الرسائل)
+    "btn_close": {"ar": "❌ إغلاق", "en": "❌ Close"},
+    "btn_back": {"ar": "⬅️ رجوع", "en": "⬅️ Back"},
+    "btn_cancel": {"ar": "❌ إلغاء", "en": "❌ Cancel"},
+    "btn_cancel_op": {"ar": "❌ إلغاء العملية", "en": "❌ Cancel operation"},
+    "btn_retry": {"ar": "🔄 أعد المحاولة", "en": "🔄 Retry"},
+    "btn_fallback": {"ar": "🔀 محاولة بديلة", "en": "🔀 Alternative method"},
+    "btn_use_fallback": {"ar": "✅ استخدم المحاولة", "en": "✅ Use this method"},
+    "btn_buy_platform": {"ar": "🛒 اشتري تحميلات {platform}", "en": "🛒 Buy {platform} downloads"},
+    "btn_buy": {"ar": "🛒 اشتري تحميلات ⭐", "en": "🛒 Buy downloads ⭐"},
+    "btn_package": {"ar": "{credits} تحميل — {stars} ⭐", "en": "{credits} downloads — {stars} ⭐"},
+    "btn_audio": {"ar": "🎵 حمل الصوت بس (MP3)", "en": "🎵 Audio only (MP3)"},
+    "btn_audio_only": {"ar": "🎵 صوت فقط (MP3)", "en": "🎵 Audio only (MP3)"},
+    "btn_done": {"ar": "✅ تم", "en": "✅ Done"},
+    "btn_post_info": {"ar": "ℹ️ معلومات المنشور", "en": "ℹ️ Post info"},
+    "btn_verify_link": {"ar": "🔎 التحقق من الرابط", "en": "🔎 Link verification"},
+    "btn_preview": {"ar": "👁️ معاينة سريعة قبل التحميل", "en": "👁️ Quick preview"},
+    "state_on_f": {"ar": "🟢 مفعّلة", "en": "🟢 On"},
+    "state_off_f": {"ar": "🔴 موقفة", "en": "🔴 Off"},
+    "state_on_m": {"ar": "🟢 مفعّل", "en": "🟢 On"},
+    "state_off_m": {"ar": "🔴 موقف", "en": "🔴 Off"},
+    "best_quality": {"ar": "أفضل جودة متوفرة", "en": "Best available quality"},
+    "size_unit": {"ar": "ميكا", "en": "MB"},
+    "post_multi_extra": {"ar": " (المنشور فيه {count} مقاطع/صور، راح تنزل كلهن)", "en": " (this post has {count} items, all will be downloaded)"},
+    "member_since": {"ar": "📅 عضو منذ", "en": "📅 Member since"},
+    "total_downloads": {"ar": "🔗 مجموع التحميلات", "en": "🔗 Total downloads"},
+    "platform_x": {"ar": "X (تويتر)", "en": "X (Twitter)"},
+    "platform_douyin": {"ar": "دويين", "en": "Douyin"},
+    "platform_wechat": {"ar": "ويشات", "en": "WeChat"},
+    "platform_rednote": {"ar": "RedNote", "en": "RedNote"},
+    "platform_bilibili": {"ar": "Bilibili", "en": "Bilibili"},
+    "post_unknown": {"ar": "غير معروف", "en": "Unknown"},
+    "post_no_handle": {"ar": "بدون يوزر", "en": "no handle"},
+    "post_no_desc": {"ar": "بدون وصف", "en": "no description"},
+    "post_count_line": {"ar": "🎞️ عدد المقاطع/الصور: {count}", "en": "🎞️ Number of items: {count}"},
 }
+
+
+# نسخ قديمة معروفة لرسائل تغير نصها بتحديث. اذا نص الرسالة المخزن بالقاعدة يطابق حرفياً واحدة منها
+# (يعني الأدمن ما عدلها) نستبدله تلقائياً بالجديد عند التشغيل. اذا الأدمن عدلها بيده ما نلمسها أبداً.
+LEGACY_MESSAGES = {
+    "fallback_confirm": {
+        "ar": [
+            "🔀 *المحاولة البديلة*\n\nهذي الطريقة تشتغل 100%، بس راح تصير مدفوعة مستقبلاً.\nعندك حالياً {remaining} من {limit} محاولة مجانية متبقية هذا الأسبوع.\n\nتريد تستخدمها؟",
+        ],
+        "en": [
+            "🔀 *Alternative Method*\n\nThis method works 100%, but it will become paid in the future.\nYou currently have {remaining} of {limit} free attempts left this week.\n\nDo you want to use it?",
+        ],
+    },
+}
+
+
+def _migrate_legacy_messages() -> int:
+    """يستبدل النصوص القديمة غير المعدلة بالجديدة. يرجع عدد الرسائل اللي تحدثت."""
+    updated = 0
+    for key, langs in LEGACY_MESSAGES.items():
+        for lang, old_texts in langs.items():
+            new_text = DEFAULT_MESSAGES.get(key, {}).get(lang)
+            if not new_text:
+                continue
+            res = _db.messages.update_one(
+                {"key": f"{key}_{lang}", "text": {"$in": old_texts}},
+                {"$set": {"text": new_text}},
+            )
+            updated += res.modified_count
+    return updated
 
 
 def init():
@@ -222,6 +464,13 @@ def init():
             _db.messages.update_one(
                 {"key": doc_key}, {"$setOnInsert": {"key": doc_key, "text": text}}, upsert=True
             )
+
+    try:
+        n = _migrate_legacy_messages()
+        if n:
+            logger.info("🔄 تم ترحيل %s رسالة قديمة للنسخة الجديدة", n)
+    except Exception:
+        logger.exception("legacy message migration failed")
 
     try:
         from . import wallet
