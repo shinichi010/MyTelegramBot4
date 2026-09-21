@@ -146,17 +146,51 @@ DEFAULT_MESSAGES = {
     },
     "fallback_confirm": {
         "ar": (
-            "🔀 *المحاولة البديلة*\n\n"
-            "هذي الطريقة تشتغل 100%، بس راح تصير مدفوعة مستقبلاً.\n"
-            "عندك حالياً {remaining} من {limit} محاولة مجانية متبقية هذا الأسبوع.\n\n"
-            "تريد تستخدمها؟"
+            "🔀 *المحاولة البديلة* ({platform})\n\n"
+            "هذي الطريقة تشتغل 100% وتنزل الفيديو من مصدر بديل.\n\n"
+            "🎁 مجانية متبقية هذا الأسبوع: {free_left}\n"
+            "💎 رصيدك المدفوع: {paid_balance}\n\n"
+            "راح تُستهلك من المجانية أولاً، وبعدها من رصيدك المدفوع.\n"
+            "ما ينخصم شي إلا بعد ما يوصلك الفيديو ✅"
         ),
         "en": (
-            "🔀 *Alternative Method*\n\n"
-            "This method works 100%, but it will become paid in the future.\n"
-            "You currently have {remaining} of {limit} free attempts left this week.\n\n"
-            "Do you want to use it?"
+            "🔀 *Alternative method* ({platform})\n\n"
+            "This method works 100% and downloads the video from a backup source.\n\n"
+            "🎁 Free attempts left this week: {free_left}\n"
+            "💎 Your paid balance: {paid_balance}\n\n"
+            "Free attempts are used first, then your paid balance.\n"
+            "Nothing is deducted until the video is delivered ✅"
         ),
+    },
+    "fallback_no_credit": {
+        "ar": (
+            "🔀 *المحاولة البديلة* ({platform})\n\n"
+            "خلصت محاولاتك المجانية لهذا الأسبوع وما عندك رصيد بـ{platform}.\n"
+            "تقدر تشتري تحميلات بالنجوم ⭐ وتكمل، وراح ينزل هذا الفيديو تلقائياً بعد الدفع:"
+        ),
+        "en": (
+            "🔀 *Alternative method* ({platform})\n\n"
+            "You've used your free attempts this week and have no {platform} balance.\n"
+            "You can buy downloads with Stars ⭐ - this video will download automatically after payment:"
+        ),
+    },
+    "paysupport": {
+        "ar": (
+            "🛟 *دعم المدفوعات*\n\n"
+            "لو صارت مشكلة بأي عملية دفع (نجوم انخصمت وما وصلك رصيد، او تريد استرجاع)، "
+            "تواصل وياي مباشرة: @snh_1\n\n"
+            "ابعث آيدي حسابك وصورة الفاتورة إن أمكن."
+        ),
+        "en": (
+            "🛟 *Payment support*\n\n"
+            "If anything goes wrong with a payment (Stars charged but no credit, or you want a refund), "
+            "contact me directly: @snh_1\n\n"
+            "Please include your account ID and a screenshot of the invoice if possible."
+        ),
+    },
+    "wechat_disabled": {
+        "ar": "تحميل ويشات مو مفعّل حالياً 🙏",
+        "en": "WeChat downloads aren't enabled right now 🙏",
     },
 }
 
@@ -188,6 +222,12 @@ def init():
             _db.messages.update_one(
                 {"key": doc_key}, {"$setOnInsert": {"key": doc_key, "text": text}}, upsert=True
             )
+
+    try:
+        from . import wallet
+        wallet.init_indexes()
+    except Exception:
+        logger.exception("failed to init wallet indexes")
 
     logger.info("✅ اتصال MongoDB جاهز")
 
