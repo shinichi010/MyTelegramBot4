@@ -56,27 +56,70 @@ def _release_heavy_slot():
 
 # مفاتيح رسائل قابلة للتعديل، لعرضها بلوحة تحكم الأدمن مع أسماء مفهومة
 EDITABLE_MESSAGES = {
+    # --- أساسية ---
     "welcome": "رسالة البداية (/start)",
+    "help": "رسالة /help",
+    "help_admin": "ملحق /help للأدمن",
     "unsupported_link": "رابط غير مدعوم",
     "fetching_qualities": "جلب خيارات الجودة (X)",
     "choose_quality": "اختيار الجودة (X)",
     "downloading": "جاري التحميل (X)",
     "downloading_douyin": "جاري التحميل (دويين)",
+    "downloading_audio": "جاري تحميل الصوت",
     "download_error": "خطأ بالتحميل",
     "post_info_error": "خطأ بمعلومات المنشور",
     "post_info_template": "قالب معلومات المنشور",
     "quality_fetch_error": "خطأ بجلب الجودة",
     "expired_request": "انتهاء صلاحية الطلب",
+    "invalid_request": "طلب غير صالح",
+    "no_files": "ما گدرت انزل المنشور",
     "platform_disabled": "منصة موقوفة",
     "user_banned": "مستخدم محظور",
     "maintenance_mode": "وضع الصيانة",
     "file_too_large": "الملف كبير جداً",
     "queue_wait": "انتظار بالطابور",
-    "fallback_retrying": "جاري إعادة المحاولة (محاولة بديلة)",
+    "multi_links": "عدة روابط بالرسالة",
+    "verifying_link": "جاري التحقق من الرابط",
+    "link_verify_failed": "فشل التحقق من الرابط",
+    "retrying": "جاري إعادة المحاولة",
+    "deeplink_invalid": "Deep Link غير صالح",
+    "cancel_done": "تم إلغاء العملية",
+    "cancel_none": "ماكو عملية معلقة",
+    # --- المحاولة البديلة ---
+    "fallback_retrying": "جاري المحاولة البديلة",
     "fallback_failed": "فشلت المحاولة البديلة",
     "fallback_limit_reached": "وصل حد المحاولة البديلة الأسبوعي",
-    "link_verify_failed": "فشل التحقق من الرابط",
-    "fallback_confirm": "تأكيد استخدام المحاولة البديلة",
+    "fallback_confirm": "تأكيد المحاولة البديلة (عنده رصيد)",
+    "fallback_no_credit": "المحاولة البديلة (ما عنده رصيد)",
+    "fallback_admin": "المحاولة البديلة (للأدمن)",
+    "fallback_disabled": "المحاولة البديلة موقفة",
+    "wechat_disabled": "ويشات غير مفعّل",
+    "low_balance_one": "تنبيه: باقي تحميل واحد",
+    "low_balance_zero": "تنبيه: خلص الرصيد",
+    # --- المتجر والدفع ---
+    "shop_title": "المتجر: العنوان",
+    "shop_pick_platform": "المتجر: اختيار المنصة",
+    "shop_platform_title": "المتجر: عنوان باقات منصة",
+    "shop_pick_package": "المتجر: اختيار الباقة",
+    "shop_disabled": "المتجر: الشراء موقف",
+    "shop_invoice_error": "المتجر: تعذر إنشاء الفاتورة",
+    "invoice_title": "عنوان الفاتورة",
+    "invoice_desc": "وصف الفاتورة",
+    "pay_success": "تم الدفع بنجاح",
+    "pay_unknown_payload": "دفعة payload غير مفهوم",
+    "pay_invalid_invoice": "رفض: فاتورة غير صالحة",
+    "pay_platform_disabled": "رفض: الشراء موقف للمنصة",
+    "pay_price_changed": "رفض: تغير السعر",
+    "pay_unavailable": "رفض: الخدمة غير متاحة",
+    "pay_error": "رفض: خطأ عام",
+    "paysupport": "رسالة /paysupport",
+    "refund_user_notice": "إشعار المستخدم بالاسترجاع",
+    "gift_user_notice": "إشعار المستخدم بالهدية",
+    # --- /stats ---
+    "stats_title": "/stats: العنوان",
+    "stats_no_downloads": "/stats: ما عنده تحميلات",
+    "stats_balance_title": "/stats: عنوان الرصيد",
+    "stats_balance_line": "/stats: سطر رصيد منصة",
 }
 
 # شرح المتغيرات المتوفرة لكل رسالة قابلة للتعديل، يطلع للأدمن وقت التعديل
@@ -96,11 +139,21 @@ MESSAGE_VARIABLE_HINTS = {
     "fallback_failed": "المتغير المتوفر: `{error}` — نص الخطأ الفعلي.",
     "fallback_limit_reached": "المتغير المتوفر: `{limit}` — الحد الأسبوعي الحالي.",
     "link_verify_failed": "المتغير المتوفر: `{url}` — الرابط اللي فشل التحقق منه.",
-    "fallback_confirm": "المتغيرات المتوفرة: `{remaining}` — المحاولات المتبقية، `{limit}` — الحد الأسبوعي الكلي.",
+    "fallback_confirm": "المتغيرات: `{platform}` اسم المنصة، `{free_left}` المجانية المتبقية، `{paid_balance}` الرصيد المدفوع.",
+    "fallback_no_credit": "المتغير: `{platform}` — اسم المنصة.",
+    "multi_links": "المتغير: `{count}` — عدد الروابط.",
+    "low_balance_one": "المتغير: `{platform}` — اسم المنصة.",
+    "low_balance_zero": "المتغير: `{platform}` — اسم المنصة.",
+    "shop_platform_title": "المتغير: `{platform}` — اسم المنصة.",
+    "invoice_title": "المتغيرات: `{credits}` عدد التحميلات، `{platform}` المنصة.",
+    "invoice_desc": "المتغيرات: `{credits}` عدد التحميلات، `{platform}` المنصة.",
+    "pay_success": "المتغيرات: `{credits}` المضاف، `{platform}` المنصة، `{balance}` الرصيد الحالي.",
+    "gift_user_notice": "المتغيرات: `{credits}` عدد التحميلات، `{platform}` المنصة.",
+    "stats_balance_line": "المتغيرات: `{platform}` المنصة، `{free}` المجانية، `{paid}` المدفوعة.",
 }
 
-# محادثة تعديل رسالة (أدمن فقط): user_id -> key الرسالة اللي ينتظر نصها الجديد
-AWAITING_MESSAGE_EDIT: dict[int, str] = {}
+# محادثة تعديل رسالة (أدمن فقط): user_id -> (key الرسالة، اللغة) اللي ينتظر نصها الجديد
+AWAITING_MESSAGE_EDIT: dict[int, tuple[str, str]] = {}
 
 # محادثة تعديل ستيكر (أدمن فقط): user_id -> key الستيكر اللي ينتظر يرسله
 AWAITING_STICKER_EDIT: dict[int, str] = {}
@@ -259,14 +312,14 @@ def _build_fallback_menu_buttons(platform: str) -> list:
 async def _record_download_failure(context: ContextTypes.DEFAULT_TYPE, platform: str, error: str):
     count = db.record_failure(platform)
     threshold = _get_limit_value("failure_alert_threshold")
-    if count == threshold and config.ADMIN_CHAT_ID:
+    if count == threshold:
         try:
-            await context.bot.send_message(
-                config.ADMIN_CHAT_ID,
+            await payments.notify(
+                context,
                 f"⚠️ تنبيه: صار {count} حالات فشل متتالية بمنصة *{platform}*.\n"
                 f"آخر خطأ: {error[:300]}\n\n"
                 "ممكن الروابط تحتاج تحديث كوكيز، او فيه مشكلة بالمنصة نفسها.",
-                parse_mode="Markdown",
+                markdown=True, kind="failure",
             )
         except Exception:
             logger.exception("failed to send failure alert to admin")
@@ -277,15 +330,14 @@ def _record_download_success(platform: str):
 
 
 async def _notify_admin_if_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not config.ADMIN_CHAT_ID:
-        return
-
     user = update.effective_user
     if not user:
         return
 
     is_new = db.upsert_user(user.id, user.username or "", user.full_name or "")
     if not is_new:
+        return
+    if not payments.target_for("new_user"):
         return
 
     name = user.full_name or "بدون اسم"
@@ -299,13 +351,26 @@ async def _notify_admin_if_new(update: Update, context: ContextTypes.DEFAULT_TYP
 
     try:
         photos = await context.bot.get_user_profile_photos(user.id, limit=1)
+        sent = False
         if photos.total_count > 0:
             file_id = photos.photos[0][-1].file_id
-            await context.bot.send_photo(config.ADMIN_CHAT_ID, file_id, caption=caption)
-        else:
-            await context.bot.send_message(config.ADMIN_CHAT_ID, caption)
+            sent = await payments.notify_photo(context, "new_user", file_id, caption)
+        if not sent:
+            await payments.notify(context, caption, kind="new_user")
     except Exception:
         logger.exception("failed to notify admin about new user")
+
+
+async def _safe_markdown(send_fn, text: str, **kwargs):
+    """يرسل/يعدل رسالة بـ Markdown، ولو تيليگرام رفضها (رمز * او _ غير مغلق بنص عدله الأدمن)
+    يعيد الإرسال كنص عادي بدل ما تنهار العملية."""
+    from telegram.error import BadRequest
+    try:
+        return await send_fn(text, parse_mode="Markdown", **kwargs)
+    except BadRequest as e:
+        if "parse entities" in str(e).lower() or "can't find end" in str(e).lower():
+            return await send_fn(text.replace("*", "").replace("`", ""), **kwargs)
+        raise
 
 
 def _lang(user_id: int) -> str:
@@ -326,7 +391,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user = update.effective_user
                 await _process_single_link(update, context, user, platform, url)
                 return
-        await update.message.reply_text("رابط الـ Deep Link غير صالح، جرب ترسل الرابط مباشرة ❌")
+        await update.message.reply_text(db.get_message("deeplink_invalid", _lang(update.effective_user.id)))
         return
 
     # كل ضغطة /start تعرض اختيار اللغة أول، بعدها رسالة الترحيب باللغة المختارة
@@ -383,24 +448,11 @@ def build_deep_link(bot_username: str, url: str) -> str:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _clear_awaiting_states(update.effective_user.id)
-    text = (
-        "📖 *الأوامر المتوفرة*\n\n"
-        "/start — رسالة الترحيب وشرح المنصات المدعومة\n"
-        "/stats — إحصائياتك الشخصية + إعدادات (معلومات المنشور، التحقق من الرابط)\n"
-        "/help — هذي الرسالة\n\n"
-        "📎 *شلون تستخدم البوت*\n"
-        "بس ارسل رابط من X، دويين، ويشات، RedNote، او Bilibili — تقدر ترسل عدة "
-        "روابط بنفس الرسالة وراح انزلهن وحدة وحدة بالترتيب.\n\n"
-        "▪️ روابط X، RedNote، وBilibili: تطلع الك خيارات جودة مع الحجم تختار منها.\n"
-        "▪️ روابط دويين وويشات: تتنزل تلقائياً بأعلى جودة متوفرة.\n"
-        "▪️ اي فيديو تكدر تحمل الصوت بس منه (MP3) بزر منفصل."
-    )
+    lang = _lang(update.effective_user.id)
+    text = db.get_message("help", lang)
     if _is_admin(update.effective_user.id):
-        text += (
-            "\n\n🛠️ انت أدمن - استخدم /admin لفتح لوحة التحكم.\n"
-            "لو صارت عالق بمنتصف تعديل رسالة/ستيكر/حد رقمي وتريد تلغيه، استخدم /cancel."
-        )
-    await update.message.reply_text(text, parse_mode="Markdown")
+        text += db.get_message("help_admin", lang)
+    await _safe_markdown(update.message.reply_text, text)
 
 
 async def deeplink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -440,10 +492,8 @@ def _clear_awaiting_states(user_id: int) -> bool:
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """يلغي اي محادثة تعديل معلقة (رسالة/ستيكر/حد رقمي) عالقة بانتظار نص من الأدمن."""
     was_waiting = _clear_awaiting_states(update.effective_user.id)
-    if was_waiting:
-        await update.message.reply_text("✅ تم إلغاء العملية المعلقة.")
-    else:
-        await update.message.reply_text("ماكو عملية معلقة حالياً.")
+    lang = _lang(update.effective_user.id)
+    await update.message.reply_text(db.get_message("cancel_done" if was_waiting else "cancel_none", lang))
 
 
 async def my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -458,48 +508,33 @@ def _build_stats_view(user_id: int):
     info = db.get_user_info(user_id)
     stats = db.get_user_link_stats(user_id)
     lang = _lang(user_id)
-    ar = lang == "ar"
+    gm = lambda k, **kw: db.get_message(k, lang, **kw)
 
-    platform_names = {"x": "X (تويتر)" if ar else "X (Twitter)", "douyin": "دويين" if ar else "Douyin",
-                      "wechat": "ويشات" if ar else "WeChat", "rednote": "RedNote", "bilibili": "Bilibili"}
-    lines = ["📊 *إحصائياتك بالبوت*\n" if ar else "📊 *Your stats*\n"]
-
+    lines = [gm("stats_title")]
     if info and info.get("joined_at"):
-        lines.append(f"📅 {'عضو منذ' if ar else 'Member since'}: {info['joined_at'].strftime('%Y-%m-%d')}")
-
-    lines.append(f"🔗 {'مجموع التحميلات' if ar else 'Total downloads'}: {stats['total']}")
+        lines.append(f"{gm('member_since')}: {info['joined_at'].strftime('%Y-%m-%d')}")
+    lines.append(f"{gm('total_downloads')}: {stats['total']}")
     for platform, count in stats["by_platform"].items():
-        name = platform_names.get(platform, platform)
+        name = gm(f"platform_{platform}") if f"platform_{platform}" in db.DEFAULT_MESSAGES else platform
         lines.append(f"  • {name}: {count}")
-
     if stats["total"] == 0:
-        lines.append("\nما عندك تحميلات مسجلة لحد هسه 📭" if ar else "\nNo downloads recorded yet 📭")
+        lines.append(gm("stats_no_downloads"))
 
-    # رصيد المحاولة البديلة لكل منصة (مجاني أسبوعي + مدفوع)
-    lines.append("\n💼 *" + ("رصيد المحاولة البديلة" if ar else "Alternative-method balance") + "*")
+    lines.append(gm("stats_balance_title"))
     for p in wallet.PAID_PLATFORMS:
         a = wallet.availability(user_id, p)
-        pn = payments.pname(p, lang)
-        if ar:
-            lines.append(f"  • {pn}: 🎁 {a['free_left']} مجانية | 💎 {a['paid']} مدفوعة")
-        else:
-            lines.append(f"  • {pn}: 🎁 {a['free_left']} free | 💎 {a['paid']} paid")
-
+        lines.append(gm("stats_balance_line", platform=payments.pname(p, lang), free=a["free_left"], paid=a["paid"]))
     text = "\n".join(lines)
 
-    on, off = ("🟢 مفعّلة", "🔴 موقفة") if ar else ("🟢 On", "🔴 Off")
-    on_m, off_m = ("🟢 مفعّل", "🔴 موقف") if ar else ("🟢 On", "🔴 Off")
-    post_info_state = on if _post_info_enabled(user_id) else off
-    verify_state = on_m if _verify_link_enabled(user_id) else off_m
-    preview_state = on if _preview_enabled(user_id) else off
-
+    on_f, off_f = gm("state_on_f"), gm("state_off_f")
+    on_m, off_m = gm("state_on_m"), gm("state_off_m")
     buttons = [
-        [InlineKeyboardButton(f"ℹ️ {'معلومات المنشور' if ar else 'Post info'}: {post_info_state}", callback_data="pref:toggle_post_info")],
-        [InlineKeyboardButton(f"🔎 {'التحقق من الرابط' if ar else 'Link verification'}: {verify_state}", callback_data="pref:toggle_verify_link")],
-        [InlineKeyboardButton(f"👁️ {'معاينة سريعة قبل التحميل' if ar else 'Quick preview'}: {preview_state}", callback_data="pref:toggle_preview")],
+        [InlineKeyboardButton(f"{gm('btn_post_info')}: {on_f if _post_info_enabled(user_id) else off_f}", callback_data="pref:toggle_post_info")],
+        [InlineKeyboardButton(f"{gm('btn_verify_link')}: {on_m if _verify_link_enabled(user_id) else off_m}", callback_data="pref:toggle_verify_link")],
+        [InlineKeyboardButton(f"{gm('btn_preview')}: {on_f if _preview_enabled(user_id) else off_f}", callback_data="pref:toggle_preview")],
     ]
     if wallet.payments_enabled():
-        buttons.append([InlineKeyboardButton("🛒 اشتري تحميلات ⭐" if ar else "🛒 Buy downloads ⭐", callback_data="buy:menu")])
+        buttons.append([InlineKeyboardButton(gm("btn_buy"), callback_data="buy:menu")])
     return text, InlineKeyboardMarkup(buttons)
 
 
@@ -509,7 +544,7 @@ async def handle_pref_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if query.data == "pref:toggle_post_info":
         if not db.get_setting("post_info_global_enabled", True):
-            await query.answer("معلومات المنشور موقفة عام من الأدمن حالياً 🚫", show_alert=True)
+            await query.answer(db.get_message("post_info_disabled", _lang(query.from_user.id)), show_alert=True)
         else:
             current = db.get_user_pref(user_id, "show_post_info", True)
             db.set_user_pref(user_id, "show_post_info", not current)
@@ -520,7 +555,7 @@ async def handle_pref_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer()
     elif query.data == "pref:toggle_preview":
         if not db.get_setting("preview_global_enabled", True):
-            await query.answer("المعاينة السريعة موقفة عام من الأدمن حالياً 🚫", show_alert=True)
+            await query.answer(db.get_message("preview_disabled", _lang(query.from_user.id)), show_alert=True)
         else:
             current = _preview_enabled(user_id)
             db.set_user_pref(user_id, "show_preview", not current)
@@ -575,31 +610,64 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_wallet.handle_wallet_callback(update, context, _is_admin)
         return
 
-    if data == "adm:msgs":
-        buttons = [
-            [InlineKeyboardButton(label, callback_data=f"adm:msg:{key}")]
-            for key, label in EDITABLE_MESSAGES.items()
-        ]
+    if data == "adm:msgs" or data.startswith("adm:msgs:"):
+        # تقسيم بصفحات: 60+ رسالة ما تنحط بشاشة وحدة (حد تيليگرام 100 زر و ~4000 حرف)
+        page = int(data.split(":")[2]) if data.startswith("adm:msgs:") else 0
+        per_page = 12
+        items = list(EDITABLE_MESSAGES.items())
+        total_pages = max((len(items) + per_page - 1) // per_page, 1)
+        page = min(max(page, 0), total_pages - 1)
+        chunk = items[page * per_page:(page + 1) * per_page]
+
+        buttons = [[InlineKeyboardButton(label, callback_data=f"adm:msg:{key}")] for key, label in chunk]
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("◀️ السابق", callback_data=f"adm:msgs:{page - 1}"))
+        nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="adm:noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton("التالي ▶️", callback_data=f"adm:msgs:{page + 1}"))
+        buttons.append(nav)
         buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")])
         await query.edit_message_text(
-            "اختار الرسالة اللي تريد تعدلها 👇", reply_markup=InlineKeyboardMarkup(buttons)
+            "اختار الرسالة اللي تريد تعدلها 👇\n(بعدها تختار العربي او الإنكليزي)",
+            reply_markup=InlineKeyboardMarkup(buttons),
         )
 
+    elif data == "adm:noop":
+        pass
+
     elif data.startswith("adm:msg:"):
-        key = data.split(":", 2)[2]
-        current = db.get_message(key)
-        AWAITING_MESSAGE_EDIT[query.from_user.id] = key
-        var_hint = MESSAGE_VARIABLE_HINTS.get(
-            key,
-            "تكدر تستخدم `{error}` او `{max_size}` او `{position}` حسب نوع الرسالة، "
-            "خلهم كما هم لو ما تعرف وين تنحط."
-        )
-        await query.edit_message_text(
-            f"📝 النص الحالي لـ *{EDITABLE_MESSAGES.get(key, key)}*:\n\n"
-            f"`{current}`\n\n"
-            f"ارسل النص الجديد هسه كرسالة عادية.\n\n{var_hint}",
-            parse_mode="Markdown",
-        )
+        # الصيغة: adm:msg:{key}            -> خطوة اختيار اللغة
+        #         adm:msg:{key}:{ar|en}    -> عرض النص الحالي وانتظار النص الجديد
+        parts = data.split(":")
+        key = parts[2]
+        lang_sel = parts[3] if len(parts) > 3 else None
+
+        if lang_sel not in ("ar", "en"):
+            buttons = [
+                [InlineKeyboardButton("🇮🇶 عربي", callback_data=f"adm:msg:{key}:ar"),
+                 InlineKeyboardButton("🇬🇧 English", callback_data=f"adm:msg:{key}:en")],
+                [InlineKeyboardButton("⬅️ رجوع", callback_data=f"adm:msgs:{list(EDITABLE_MESSAGES).index(key) // 12 if key in EDITABLE_MESSAGES else 0}")],
+            ]
+            await query.edit_message_text(
+                f"✏️ *{EDITABLE_MESSAGES.get(key, key)}*\n\nأي نسخة تريد تعدل؟ 👇",
+                parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
+            )
+        else:
+            current = db.get_message(key, lang_sel)
+            AWAITING_MESSAGE_EDIT[query.from_user.id] = (key, lang_sel)
+            flag = "🇮🇶 عربي" if lang_sel == "ar" else "🇬🇧 English"
+            var_hint = MESSAGE_VARIABLE_HINTS.get(
+                key,
+                "تكدر تستخدم `{error}` او `{max_size}` او `{position}` حسب نوع الرسالة، "
+                "خلهم كما هم لو ما تعرف وين تنحط."
+            )
+            await query.edit_message_text(
+                f"📝 النص الحالي لـ *{EDITABLE_MESSAGES.get(key, key)}* ({flag}):\n\n"
+                f"`{current}`\n\n"
+                f"ارسل النص الجديد هسه كرسالة عادية.\n\n{var_hint}",
+                parse_mode="Markdown",
+            )
 
     elif data == "adm:stickers":
         buttons = []
@@ -1076,10 +1144,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # اذا الأدمن ينتظر منه نص تعديل رسالة
     elif _is_admin(user.id) and user.id in AWAITING_MESSAGE_EDIT:
-        key = AWAITING_MESSAGE_EDIT.pop(user.id)
+        key, edit_lang = AWAITING_MESSAGE_EDIT.pop(user.id)
         new_text = update.message.text
-        db.set_message(key, new_text)
-        await update.message.reply_text(f"✅ تحدثت رسالة: {EDITABLE_MESSAGES.get(key, key)}")
+        db.set_message(key, new_text, edit_lang)
+        flag = "🇮🇶 عربي" if edit_lang == "ar" else "🇬🇧 English"
+        await update.message.reply_text(f"✅ تحدثت رسالة: {EDITABLE_MESSAGES.get(key, key)} ({flag})")
         return
 
     # اذا الأدمن ينتظر منه رقم حد جديد (حجم ملف / حد الطابور / فاصل بينك)
@@ -1124,7 +1193,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(links) > 1:
         await update.message.reply_text(
-            f"📋 لقيت {len(links)} روابط بالرسالة، راح انزلهن وحدة وحدة بالترتيب."
+            db.get_message("multi_links", _lang(user.id), count=len(links))
         )
 
     for platform, url in links:
@@ -1166,12 +1235,12 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
         db.log_link(user.id, user.username or "", platform, url)
 
     if _verify_link_enabled(user.id):
-        check_msg = await update.message.reply_text("🔎 جاري التحقق من الرابط..." if lang == "ar" else "🔎 Verifying the link...")
+        check_msg = await update.message.reply_text(db.get_message("verifying_link", lang))
         ok = await downloader.verify_link(url, platform)
         await check_msg.delete()
         if not ok:
             text = db.get_message("link_verify_failed", lang, url=url)
-            keyboard = _retry_keyboard(url, platform, fail_count + 1)
+            keyboard = _retry_keyboard(url, platform, fail_count + 1, lang)
             sent = await update.message.reply_text(text, reply_markup=keyboard)
             await _schedule_auto_delete(context, sent.chat_id, sent.message_id, "download_error")
             return
@@ -1203,7 +1272,7 @@ RETRY_PENDING: dict[str, tuple[str, str, int]] = {}
 FALLBACK_CAPABLE_PLATFORMS = {"douyin", "rednote", "wechat"}
 
 
-def _retry_keyboard(url: str, platform: str, fail_count: int = 1) -> InlineKeyboardMarkup:
+def _retry_keyboard(url: str, platform: str, fail_count: int = 1, lang: str = "ar") -> InlineKeyboardMarkup:
     """يبني كيبورد الأزرار حسب عدد الفشل المتتالي لنفس الرابط:
     - دويين/RedNote/ويشات (منصات المحاولة البديلة المفعّلة):
         فشلة أولى:  🔀 محاولة بديلة + 🔄 أعد المحاولة + ❌ إلغاء
@@ -1224,10 +1293,10 @@ def _retry_keyboard(url: str, platform: str, fail_count: int = 1) -> InlineKeybo
 
     buttons = []
     if show_fallback:
-        buttons.append([InlineKeyboardButton("🔀 محاولة بديلة", callback_data=f"fallback:{retry_id}")])
+        buttons.append([InlineKeyboardButton(db.get_message("btn_fallback", lang), callback_data=f"fallback:{retry_id}")])
     if show_retry:
-        buttons.append([InlineKeyboardButton("🔄 أعد المحاولة", callback_data=f"retry:{retry_id}")])
-    buttons.append([InlineKeyboardButton("❌ إلغاء العملية", callback_data=f"cancelop:{retry_id}")])
+        buttons.append([InlineKeyboardButton(db.get_message("btn_retry", lang), callback_data=f"retry:{retry_id}")])
+    buttons.append([InlineKeyboardButton(db.get_message("btn_cancel_op", lang), callback_data=f"cancelop:{retry_id}")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -1263,7 +1332,7 @@ async def _schedule_auto_delete_seconds(context, chat_id: int, message_id: int, 
 async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1, lang: str = "ar"):
     """يعرض رسالة الخطأ مع زر إعادة المحاولة. يحاول يعدل رسالة موجودة، وإلا يرسل وحدة جديدة."""
     text = db.get_message("download_error", lang, error=error)
-    keyboard = _retry_keyboard(url, platform, fail_count)
+    keyboard = _retry_keyboard(url, platform, fail_count, lang)
     try:
         await msg.edit_text(text, reply_markup=keyboard)
         sent = msg
@@ -1296,7 +1365,7 @@ async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     # نرسل رسالة جديدة نستخدمها كـ update.message لباقي دوال المعالجة (اللي تعتمد عليها)
-    placeholder = await context.bot.send_message(chat_id, "🔄 جاري إعادة المحاولة...")
+    placeholder = await context.bot.send_message(chat_id, db.get_message("retrying", _lang(update.effective_user.id)))
     fake_update = SimpleNamespace(
         message=placeholder,
         effective_user=user,
@@ -1341,15 +1410,14 @@ async def _show_fallback_prompt(context, chat_id: int, user, url: str, platform:
     pay_on = wallet.payments_enabled(platform)
 
     def _cancel_btn(cid):
-        return InlineKeyboardButton("❌ إلغاء" if lang == "ar" else "❌ Cancel", callback_data=f"fbcancel:{cid}")
+        return InlineKeyboardButton(db.get_message("btn_cancel", lang), callback_data=f"fbcancel:{cid}")
 
     confirm_id = uuid.uuid4().hex[:10]
-    use_label = "✅ استخدم المحاولة" if lang == "ar" else "✅ Use this method"
+    use_label = db.get_message("btn_use_fallback", lang)
 
     if is_admin:
         FALLBACK_CONFIRM_PENDING[confirm_id] = (url, platform)
-        text = ("🔀 *المحاولة البديلة*\n\nأنت أدمن: مجاني وما ينخصم منك شي ✅" if lang == "ar"
-                else "🔀 *Alternative method*\n\nYou're an admin: free, nothing is deducted ✅")
+        text = db.get_message("fallback_admin", lang)
         markup = InlineKeyboardMarkup([[InlineKeyboardButton(use_label, callback_data=f"fbconfirm:{confirm_id}")],
                                        [_cancel_btn(confirm_id)]])
 
@@ -1366,7 +1434,7 @@ async def _show_fallback_prompt(context, chat_id: int, user, url: str, platform:
         # ما عنده شي: نعرض زر شراء، ونحفظ الرابط حتى نكمل تلقائياً بعد الدفع
         payments.RESUME_AFTER_PURCHASE[user.id] = (url, platform)
         text = db.get_message("fallback_no_credit", lang, platform=pname)
-        buy_label = (f"🛒 اشتري تحميلات {pname}" if lang == "ar" else f"🛒 Buy {pname} downloads")
+        buy_label = db.get_message("btn_buy_platform", lang, platform=pname)
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton(buy_label, callback_data=f"buy:plat:{platform}")],
             [_cancel_btn(confirm_id)],
@@ -1379,11 +1447,11 @@ async def _show_fallback_prompt(context, chat_id: int, user, url: str, platform:
 
     try:
         if edit_message is not None:
-            await edit_message.edit_text(text, reply_markup=markup)
+            await _safe_markdown(edit_message.edit_text, text, reply_markup=markup)
         else:
-            await context.bot.send_message(chat_id, text, reply_markup=markup)
+            await _safe_markdown(lambda t, **k: context.bot.send_message(chat_id, t, **k), text, reply_markup=markup)
     except Exception:
-        await context.bot.send_message(chat_id, text, reply_markup=markup)
+        await context.bot.send_message(chat_id, text.replace("*", "").replace("`", ""), reply_markup=markup)
 
 
 async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1409,8 +1477,7 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not db.get_setting(f"{platform}_fallback_enabled", True):
-        alert = "المحاولة البديلة موقفة حالياً 🚫" if lang == "ar" else "The alternative method is disabled right now 🚫"
-        await query.answer(alert, show_alert=True)
+        await query.answer(db.get_message("fallback_disabled", lang), show_alert=True)
         return
 
     await _show_fallback_prompt(context, query.message.chat_id, user, url, platform, edit_message=query.message)
@@ -1517,7 +1584,7 @@ async def _check_tikhub_balance(context):
             context,
             f"⚠️ *رصيد TikHub منخفض*\nالرصيد: ${bal:.3f} (الحد: ${threshold})\n"
             "اشحن رصيدك حتى ما تتوقف المحاولة البديلة عن المستخدمين.",
-            markdown=True,
+            markdown=True, kind="tikhub",
         )
 
 
@@ -1531,12 +1598,7 @@ async def _maybe_low_balance_hint(context, chat_id: int, user, platform: str):
     if total > 1:
         return
     pname = payments.pname(platform, lang)
-    if total == 1:
-        text = (f"ℹ️ باقي لك تحميل واحد بالمحاولة البديلة ({pname})." if lang == "ar"
-                else f"ℹ️ You have 1 alternative-method download left ({pname}).")
-    else:
-        text = (f"ℹ️ خلص رصيدك بالمحاولة البديلة ({pname}). تكدر تشتري تحميلات بـ /buy ⭐" if lang == "ar"
-                else f"ℹ️ You're out of alternative-method downloads ({pname}). Use /buy to top up ⭐")
+    text = db.get_message("low_balance_one" if total == 1 else "low_balance_zero", lang, platform=pname)
     try:
         await context.bot.send_message(chat_id, text)
     except Exception:
@@ -1586,7 +1648,7 @@ async def paysupport_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """أمر مطلوب من تليگرام لأي بوت يبيع بالنجوم."""
     lang = _lang(update.effective_user.id)
     text = db.get_message("paysupport", lang)
-    await update.message.reply_text(text)
+    await _safe_markdown(update.message.reply_text, text)
 
 
 async def handle_cancel_op(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1614,9 +1676,9 @@ def _escape_md(text: str) -> str:
 
 
 def _build_info_caption(meta: dict, count: int, lang: str = "ar") -> str:
-    unknown = "غير معروف" if lang == "ar" else "Unknown"
-    no_handle = "بدون يوزر" if lang == "ar" else "no handle"
-    no_desc = "بدون وصف" if lang == "ar" else "no description"
+    unknown = db.get_message("post_unknown", lang)
+    no_handle = db.get_message("post_no_handle", lang)
+    no_desc = db.get_message("post_no_desc", lang)
 
     uploader = _escape_md(meta.get("uploader") or unknown)
     uploader_id = meta.get("uploader_id")
@@ -1627,7 +1689,7 @@ def _build_info_caption(meta: dict, count: int, lang: str = "ar") -> str:
     description = _escape_md(description)
 
     if count > 1:
-        count_line = f"🎞️ عدد المقاطع/الصور: {count}" if lang == "ar" else f"🎞️ Number of items: {count}"
+        count_line = db.get_message("post_count_line", lang, count=count)
     else:
         count_line = ""
 
@@ -1648,7 +1710,7 @@ async def _send_post_info(context, chat_id: int, user_id: int, meta: dict, count
     if not _post_info_enabled(user_id):
         if reply_markup:
             # لسا لازم نرسل الأزرار (مثل زر الصوت) حتى لو المعلومات موقفة
-            done_text = "✅ تم" if lang == "ar" else "✅ Done"
+            done_text = db.get_message("btn_done", lang)
             sent = await context.bot.send_message(chat_id, done_text, reply_markup=reply_markup)
         return
     try:
@@ -1722,8 +1784,8 @@ async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
     PENDING[req_id] = (url, platform)
 
     buttons = []
-    best_label = "أفضل جودة متوفرة" if lang == "ar" else "Best available quality"
-    size_unit = "ميكا" if lang == "ar" else "MB"
+    best_label = db.get_message("best_quality", lang)
+    size_unit = db.get_message("size_unit", lang)
     for h, size_bytes in quality_options:
         label = f"{h}p" if h else best_label
         if size_bytes:
@@ -1732,11 +1794,11 @@ async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
         buttons.append([InlineKeyboardButton(
             label, callback_data=f"dl:{req_id}:{h}"
         )])
-    audio_label = "🎵 صوت فقط (MP3)" if lang == "ar" else "🎵 Audio only (MP3)"
+    audio_label = db.get_message("btn_audio_only", lang)
     buttons.append([InlineKeyboardButton(audio_label, callback_data=f"dl:{req_id}:audio")])
 
     if count > 1:
-        extra = f" (المنشور فيه {count} مقاطع/صور، راح تنزل كلهن)" if lang == "ar" else f" (this post has {count} items, all will be downloaded)"
+        extra = db.get_message("post_multi_extra", lang, count=count)
     else:
         extra = ""
     await msg.edit_text(
@@ -1763,7 +1825,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         files, meta = await downloader.download_video(url, platform, 0)
         if not files:
-            no_files_msg = "ما گدرت انزل هذا المنشور" if lang == "ar" else "Couldn't download this post"
+            no_files_msg = db.get_message("no_files", lang)
             await _send_error_with_retry(
                 context, chat_id, msg, no_files_msg, url, platform, fail_count + 1, lang
             )
@@ -1791,7 +1853,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         req_id = uuid.uuid4().hex[:10]
         PENDING[f"audio_{platform}_{req_id}"] = url
         audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
-            "🎵 حمل الصوت بس (MP3)" if lang == "ar" else "🎵 Audio only (MP3)", callback_data=f"aud:{platform}:{req_id}"
+            db.get_message("btn_audio", lang), callback_data=f"aud:{platform}:{req_id}"
         )]])
         _record_download_success(platform)
         try:
@@ -1818,7 +1880,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
         is_audio = (choice == "audio")
         height = 0 if is_audio else int(choice)
     except ValueError:
-        await query.edit_message_text("طلب غير صالح ❌" if lang == "ar" else "Invalid request ❌")
+        await query.edit_message_text(db.get_message("invalid_request", lang))
         return
 
     pending = PENDING.pop(req_id, None)
@@ -1906,7 +1968,7 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     chat_id = query.message.chat_id
-    status = await context.bot.send_message(chat_id, "🎵 جاري تحميل الصوت..." if lang == "ar" else "🎵 Downloading audio...")
+    status = await context.bot.send_message(chat_id, db.get_message("downloading_audio", lang))
 
     files = []
     try:
