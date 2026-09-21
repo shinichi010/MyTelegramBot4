@@ -33,6 +33,10 @@ MAX_QUALITY_HEIGHT = int(os.environ.get("MAX_QUALITY_HEIGHT", "1080"))
 # --- آيدي التليگرام الرقمي حقك، يوصلك عليه إشعار كل مستخدم جديد يستخدم البوت ---
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "")
 
+# --- قناة/مجموعة إشعارات الشراء والتنبيهات (آيدي رقمي سالب مثل -1001234567890) ---
+# لازم البوت يكون أدمن بالقناة. اذا فاضي، الإشعارات تروح لـ ADMIN_CHAT_ID بالخاص.
+NOTIFY_CHANNEL_ID = os.environ.get("NOTIFY_CHANNEL_ID", "")
+
 # --- رابط اتصال MongoDB (يحفظ فقط بيانات نصية: مستخدمين، رسائل، روابط، حظر - ابداً ملفات) ---
 MONGO_URI = os.environ.get("MONGO_URI", "")
 MONGO_DB_NAME = os.environ.get("MONGO_DB_NAME", "x_douyin_bot")
