@@ -11,6 +11,7 @@
 """
 import os
 import re
+import time
 import uuid
 import logging
 
@@ -25,6 +26,11 @@ WECHAT_PATTERN = re.compile(
 )
 
 TIKHUB_BASE = "https://api.tikhub.io/api/v1/wechat_channels/v2"
+
+# إعادة محاولة فك التشفير (بسبب نوم خدمة Render المجانية)
+DECRYPT_ATTEMPTS = 3
+DECRYPT_TIMEOUT = 90          # ثانية لكل محاولة (الاستيقاظ يأخذ وقت)
+DECRYPT_BACKOFF_SEC = 8       # انتظار 8 ثم 16 ثانية بين المحاولات
 
 
 def detect(text: str) -> bool:
@@ -100,19 +106,35 @@ def download_and_decrypt(share_url: str) -> tuple[str, dict]:
             for chunk in r.iter_content(chunk_size=1024 * 256):
                 f.write(chunk)
 
-    # إرسال الملف المشفر لخدمة فك التشفير
+    # إرسال الملف المشفر لخدمة فك التشفير.
+    # خدمة Render المجانية تنام بعد ~15 دقيقة، فأول طلب غالباً يفشل/يتأخر (استيقاظ).
+    # نعيد المحاولة داخلياً 3 مرات مع انتظار متزايد قبل ما نعتبرها فشل فعلي (حتى ما ينزعج المستخدم).
     decrypted_path = os.path.join(config.DOWNLOAD_DIR, f"{uuid.uuid4()}_wx_decrypted.mp4")
+    last_err = None
     try:
-        with open(encrypted_path, "rb") as f:
-            resp = requests.post(
-                f"{config.WECHAT_DECRYPT_API_URL}/api/decrypt",
-                files={"video": f},
-                data={"decode_key": str(media["decode_key"])},
-                timeout=60,
-            )
-        resp.raise_for_status()
-        with open(decrypted_path, "wb") as f:
-            f.write(resp.content)
+        for attempt in range(1, DECRYPT_ATTEMPTS + 1):
+            try:
+                with open(encrypted_path, "rb") as f:
+                    resp = requests.post(
+                        f"{config.WECHAT_DECRYPT_API_URL}/api/decrypt",
+                        files={"video": f},
+                        data={"decode_key": str(media["decode_key"])},
+                        timeout=DECRYPT_TIMEOUT,
+                    )
+                resp.raise_for_status()
+                if not resp.content:
+                    raise ValueError("خدمة فك التشفير رجعت ملف فاضي")
+                with open(decrypted_path, "wb") as f:
+                    f.write(resp.content)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                logger.warning("wechat decrypt attempt %s/%s failed: %s", attempt, DECRYPT_ATTEMPTS, e)
+                if attempt < DECRYPT_ATTEMPTS:
+                    time.sleep(DECRYPT_BACKOFF_SEC * attempt)
+        if last_err is not None:
+            raise last_err
     finally:
         if os.path.exists(encrypted_path):
             os.remove(encrypted_path)
