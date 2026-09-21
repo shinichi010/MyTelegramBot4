@@ -37,6 +37,28 @@ def _fmt_tx(t: dict) -> str:
     return f"{ts} {kind} {plat} {t.get('credits', 0):+d}{extra}"
 
 
+def _notify_text() -> str:
+    ch = config.NOTIFY_CHANNEL_ID
+    lines = [
+        "📢 *وجهة الإشعارات*",
+        f"القناة: `{ch}`" if ch else "القناة: ❌ غير مضبوطة (ضيف `NOTIFY_CHANNEL_ID` بـ Render)",
+        f"الخاص: `{config.ADMIN_CHAT_ID or '—'}`",
+        "",
+        "اضغط على أي نوع حتى تبدل وجهته بين 📢 القناة و 👤 الخاص:",
+    ]
+    return "\n".join(lines)
+
+
+def _notify_markup() -> Markup:
+    rows = []
+    for kind, label in payments.NOTIFY_KINDS.items():
+        dest = "📢 القناة" if payments.get_route(kind) == "channel" else "👤 الخاص"
+        rows.append([Btn(f"{label}: {dest}", callback_data=f"adm:w:route:{kind}")])
+    rows.append([Btn("📨 إرسال رسالة تجريبية", callback_data="adm:w:notify_test")])
+    rows.append(_back())
+    return Markup(rows)
+
+
 # ==================== القائمة الرئيسية ====================
 
 def main_menu() -> Markup:
@@ -173,26 +195,37 @@ async def handle_wallet_callback(update: Update, context: ContextTypes.DEFAULT_T
             "مثال:\n`10 15`\n`30 40`\n`100 120`",
             parse_mode="Markdown", reply_markup=Markup([_back("adm:w:pkgs")]))
 
-    # ----- قناة الإشعارات -----
+    # ----- قناة الإشعارات + وجهة كل نوع -----
     elif action == "notify":
-        tgt = payments.notify_target() or "غير محدد"
-        src = "قناة (NOTIFY_CHANNEL_ID)" if config.NOTIFY_CHANNEL_ID else "الخاص (ADMIN_CHAT_ID)"
-        await query.edit_message_text(
-            f"📢 وجهة الإشعارات الحالية:\n`{tgt}`\nالمصدر: {src}\n\n"
-            "اضغط تجربة حتى أدز رسالة تجريبية وتتأكد ان البوت يكدر يكتب هناك.",
-            parse_mode="Markdown",
-            reply_markup=Markup([[Btn("📨 إرسال رسالة تجريبية", callback_data="adm:w:notify_test")], _back()]))
+        await query.edit_message_text(_notify_text(), parse_mode="Markdown", reply_markup=_notify_markup())
+
+    elif action.startswith("route:"):
+        kind = action.split(":", 1)[1]
+        if kind in payments.NOTIFY_KINDS:
+            current = payments.get_route(kind)
+            if current == "private" and not config.NOTIFY_CHANNEL_ID:
+                await query.answer("ضيف NOTIFY_CHANNEL_ID بـ Render أولاً حتى تكدر تختار القناة ⚠️", show_alert=True)
+            else:
+                payments.set_route(kind, "private" if current == "channel" else "channel")
+        await query.edit_message_text(_notify_text(), parse_mode="Markdown", reply_markup=_notify_markup())
 
     elif action == "notify_test":
-        ok = await payments.notify(context, "✅ رسالة تجريبية من البوت — الإشعارات تشتغل هنا.")
-        tgt = payments.notify_target() or "—"
-        if ok:
-            msg = f"✅ وصلت الرسالة التجريبية إلى: `{tgt}`"
-        else:
-            msg = (f"❌ فشل الإرسال إلى: `{tgt}`\n\nتأكد من:\n"
-                   "• البوت مضاف للقناة كـ *أدمن* وعنده صلاحية نشر الرسائل\n"
-                   "• آيدي القناة صحيح (يبدأ بـ -100)\n"
-                   "• متغير `NOTIFY_CHANNEL_ID` مضاف بـ Render وسويت Deploy")
+        lines = []
+        seen = {}
+        for kind, label in payments.NOTIFY_KINDS.items():
+            tgt = payments.target_for(kind)
+            if tgt in seen:
+                lines.append(f"• {label}: {seen[tgt]}")
+                continue
+            ok = await payments.notify(context, f"✅ رسالة تجريبية من البوت ({label}) — الإشعارات تشتغل هنا.", kind=kind)
+            seen[tgt] = "✅ وصلت" if ok else "❌ فشل"
+            lines.append(f"• {label} ← `{tgt}`: {seen[tgt]}")
+        msg = "📨 نتيجة التجربة:\n\n" + "\n".join(lines)
+        if any("فشل" in v for v in seen.values()):
+            msg += ("\n\nإذا فشلت القناة تأكد من:\n"
+                    "• البوت مضاف للقناة كـ *أدمن* وعنده صلاحية نشر الرسائل\n"
+                    "• آيدي القناة صحيح (يبدأ بـ -100)\n"
+                    "• متغير `NOTIFY_CHANNEL_ID` مضاف بـ Render وسويت Deploy")
         await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=Markup([_back("adm:w:notify")]))
 
     # ----- إحصائيات -----
