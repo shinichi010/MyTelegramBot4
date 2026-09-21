@@ -6,10 +6,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application, ApplicationBuilder, CommandHandler,
-    MessageHandler, CallbackQueryHandler, ContextTypes, filters,
+    MessageHandler, CallbackQueryHandler, ContextTypes, filters, PreCheckoutQueryHandler,
 )
 
-from . import config, downloader, db, tikhub, wechat
+from . import config, downloader, db, tikhub, wechat, wallet, payments, admin_wallet
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
@@ -124,6 +124,8 @@ LIMIT_LABELS = {
     "fallback_failure_autodelete_sec": "مدة حذف رسالة فشل المحاولة البديلة",
     "failure_alert_threshold": "عدد الفشل المتتالي قبل تنبيه الأدمن",
     "rednote_fallback_weekly_limit": "حد المحاولة البديلة الأسبوعي لكل مستخدم (RedNote)",
+    "wechat_fallback_weekly_limit": "حد المحاولة البديلة الأسبوعي لكل مستخدم (ويشات)",
+    "low_tikhub_balance_usd": "حد تنبيه رصيد TikHub (دولار)",
 }
 LIMIT_UNITS = {
     "max_file_size_mb": "ميكا",
@@ -136,6 +138,8 @@ LIMIT_UNITS = {
     "fallback_failure_autodelete_sec": "ثانية",
     "failure_alert_threshold": "حالة فشل",
     "rednote_fallback_weekly_limit": "محاولة/أسبوع",
+    "wechat_fallback_weekly_limit": "محاولة/أسبوع",
+    "low_tikhub_balance_usd": "دولار",
 }
 
 STICKER_LABELS = {
@@ -216,6 +220,8 @@ def _get_limit_value(key: str) -> int:
         "fallback_failure_autodelete_sec": 15,
         "failure_alert_threshold": 5,
         "rednote_fallback_weekly_limit": 5,
+        "wechat_fallback_weekly_limit": 1,
+        "low_tikhub_balance_usd": 2,
     }
     return int(db.get_setting(key, defaults.get(key, 0)))
 
@@ -226,8 +232,8 @@ def _build_fallback_menu_buttons(platform: str) -> list:
     fb_enabled = db.get_setting(f"{platform}_fallback_enabled", True)
     fail_del_enabled = db.get_setting("fallback_failure_autodelete_enabled", False)
     weekly_key = f"{platform}_fallback_weekly_limit"
-    toggle_cb = "adm:rednote_fallback_toggle" if platform == "rednote" else "adm:fallback_toggle"
-    fail_del_cb = "adm:rednote_fallback_fail_del_toggle" if platform == "rednote" else "adm:fallback_fail_del_toggle"
+    toggle_cb = {"rednote": "adm:rednote_fallback_toggle", "wechat": "adm:wechat_fallback_toggle"}.get(platform, "adm:fallback_toggle")
+    fail_del_cb = {"rednote": "adm:rednote_fallback_fail_del_toggle", "wechat": "adm:wechat_fallback_fail_del_toggle"}.get(platform, "adm:fallback_fail_del_toggle")
 
     return [
         [InlineKeyboardButton(
@@ -424,7 +430,8 @@ def _clear_awaiting_states(user_id: int) -> bool:
     يرجع True لو كان فيه حالة انتظار فعلاً. تُستدعى بأول كل أمر (/command) حتى
     اي أمر يقطع تلقائياً اي تعديل معلق بدل ما ينحفظ نص الأمر نفسه بالغلط."""
     return (
-        AWAITING_MESSAGE_EDIT.pop(user_id, None) is not None
+        admin_wallet.AWAITING_WALLET.pop(user_id, None) is not None
+        or AWAITING_MESSAGE_EDIT.pop(user_id, None) is not None
         or AWAITING_STICKER_EDIT.pop(user_id, None) is not None
         or AWAITING_LIMIT_EDIT.pop(user_id, None) is not None
     )
@@ -450,32 +457,49 @@ async def my_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def _build_stats_view(user_id: int):
     info = db.get_user_info(user_id)
     stats = db.get_user_link_stats(user_id)
+    lang = _lang(user_id)
+    ar = lang == "ar"
 
-    platform_names = {"x": "X (تويتر)", "douyin": "دويين", "wechat": "ويشات"}
-    lines = ["📊 *إحصائياتك بالبوت*\n"]
+    platform_names = {"x": "X (تويتر)" if ar else "X (Twitter)", "douyin": "دويين" if ar else "Douyin",
+                      "wechat": "ويشات" if ar else "WeChat", "rednote": "RedNote", "bilibili": "Bilibili"}
+    lines = ["📊 *إحصائياتك بالبوت*\n" if ar else "📊 *Your stats*\n"]
 
     if info and info.get("joined_at"):
-        lines.append(f"📅 عضو منذ: {info['joined_at'].strftime('%Y-%m-%d')}")
+        lines.append(f"📅 {'عضو منذ' if ar else 'Member since'}: {info['joined_at'].strftime('%Y-%m-%d')}")
 
-    lines.append(f"🔗 مجموع التحميلات: {stats['total']}")
+    lines.append(f"🔗 {'مجموع التحميلات' if ar else 'Total downloads'}: {stats['total']}")
     for platform, count in stats["by_platform"].items():
         name = platform_names.get(platform, platform)
         lines.append(f"  • {name}: {count}")
 
     if stats["total"] == 0:
-        lines.append("\nما عندك تحميلات مسجلة لحد هسه 📭")
+        lines.append("\nما عندك تحميلات مسجلة لحد هسه 📭" if ar else "\nNo downloads recorded yet 📭")
+
+    # رصيد المحاولة البديلة لكل منصة (مجاني أسبوعي + مدفوع)
+    lines.append("\n💼 *" + ("رصيد المحاولة البديلة" if ar else "Alternative-method balance") + "*")
+    for p in wallet.PAID_PLATFORMS:
+        a = wallet.availability(user_id, p)
+        pn = payments.pname(p, lang)
+        if ar:
+            lines.append(f"  • {pn}: 🎁 {a['free_left']} مجانية | 💎 {a['paid']} مدفوعة")
+        else:
+            lines.append(f"  • {pn}: 🎁 {a['free_left']} free | 💎 {a['paid']} paid")
 
     text = "\n".join(lines)
 
-    post_info_state = "🟢 مفعّلة" if _post_info_enabled(user_id) else "🔴 موقفة"
-    verify_state = "🟢 مفعّل" if _verify_link_enabled(user_id) else "🔴 موقف"
-    preview_state = "🟢 مفعّلة" if _preview_enabled(user_id) else "🔴 موقفة"
+    on, off = ("🟢 مفعّلة", "🔴 موقفة") if ar else ("🟢 On", "🔴 Off")
+    on_m, off_m = ("🟢 مفعّل", "🔴 موقف") if ar else ("🟢 On", "🔴 Off")
+    post_info_state = on if _post_info_enabled(user_id) else off
+    verify_state = on_m if _verify_link_enabled(user_id) else off_m
+    preview_state = on if _preview_enabled(user_id) else off
 
     buttons = [
-        [InlineKeyboardButton(f"ℹ️ معلومات المنشور: {post_info_state}", callback_data="pref:toggle_post_info")],
-        [InlineKeyboardButton(f"🔎 التحقق من الرابط: {verify_state}", callback_data="pref:toggle_verify_link")],
-        [InlineKeyboardButton(f"👁️ معاينة سريعة قبل التحميل: {preview_state}", callback_data="pref:toggle_preview")],
+        [InlineKeyboardButton(f"ℹ️ {'معلومات المنشور' if ar else 'Post info'}: {post_info_state}", callback_data="pref:toggle_post_info")],
+        [InlineKeyboardButton(f"🔎 {'التحقق من الرابط' if ar else 'Link verification'}: {verify_state}", callback_data="pref:toggle_verify_link")],
+        [InlineKeyboardButton(f"👁️ {'معاينة سريعة قبل التحميل' if ar else 'Quick preview'}: {preview_state}", callback_data="pref:toggle_preview")],
     ]
+    if wallet.payments_enabled():
+        buttons.append([InlineKeyboardButton("🛒 اشتري تحميلات ⭐" if ar else "🛒 Buy downloads ⭐", callback_data="buy:menu")])
     return text, InlineKeyboardMarkup(buttons)
 
 
@@ -517,6 +541,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _clear_awaiting_states(update.effective_user.id)
 
     buttons = [
+        [InlineKeyboardButton("💰 الأرصدة والدفع", callback_data="adm:w:menu")],
         [InlineKeyboardButton("✏️ تعديل الرسائل", callback_data="adm:msgs")],
         [InlineKeyboardButton("🖼️ تعديل الستيكرات", callback_data="adm:stickers")],
         [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
@@ -545,6 +570,10 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     data = query.data
+
+    if data.startswith("adm:w:"):
+        await admin_wallet.handle_wallet_callback(update, context, _is_admin)
+        return
 
     if data == "adm:msgs":
         buttons = [
@@ -726,6 +755,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "adm:back":
         buttons = [
+            [InlineKeyboardButton("💰 الأرصدة والدفع", callback_data="adm:w:menu")],
             [InlineKeyboardButton("✏️ تعديل الرسائل", callback_data="adm:msgs")],
             [InlineKeyboardButton("🖼️ تعديل الستيكرات", callback_data="adm:stickers")],
             [InlineKeyboardButton("📊 إحصائيات", callback_data="adm:stats")],
@@ -816,6 +846,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )],
             [InlineKeyboardButton("🔀 المحاولة البديلة (دويين)", callback_data="adm:fallback_menu")],
             [InlineKeyboardButton("🔀 المحاولة البديلة (RedNote)", callback_data="adm:rednote_fallback_menu")],
+            [InlineKeyboardButton("🔀 المحاولة البديلة (ويشات)", callback_data="adm:wechat_fallback_menu")],
+            [InlineKeyboardButton(
+                f"💵 {LIMIT_LABELS['low_tikhub_balance_usd']}: {_get_limit_value('low_tikhub_balance_usd')}$",
+                callback_data="adm:limit_edit:low_tikhub_balance_usd",
+            )],
             [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")],
         ]
         await query.edit_message_text(
@@ -827,6 +862,21 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "إعدادات المحاولة البديلة لدويين (عبر TikHub) 👇",
             reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:wechat_fallback_menu":
+        buttons = _build_fallback_menu_buttons("wechat")
+        await query.edit_message_text(
+            "إعدادات المحاولة البديلة لويشات (TikHub + فك التشفير) 👇",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:wechat_fallback_toggle":
+        current = db.get_setting("wechat_fallback_enabled", True)
+        db.set_setting("wechat_fallback_enabled", not current)
+        await query.answer("تم التغيير ✅")
+        await query.edit_message_reply_markup(
+            reply_markup=InlineKeyboardMarkup(_build_fallback_menu_buttons("wechat"))
         )
 
     elif data == "adm:rednote_fallback_menu":
@@ -865,6 +915,16 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons = _build_fallback_menu_buttons("rednote")
         await query.edit_message_text(
             "إعدادات المحاولة البديلة لـ RedNote (عبر TikHub) 👇",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:wechat_fallback_fail_del_toggle":
+        current = db.get_setting("fallback_failure_autodelete_enabled", False)
+        db.set_setting("fallback_failure_autodelete_enabled", not current)
+        await query.answer("تم التغيير ✅")
+        buttons = _build_fallback_menu_buttons("wechat")
+        await query.edit_message_text(
+            "إعدادات المحاولة البديلة لويشات (TikHub + فك التشفير) 👇",
             reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -1009,6 +1069,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if raw_text.startswith("/"):
         _clear_awaiting_states(user.id)
 
+    # اذا الأدمن بحالة انتظار لوحة الأرصدة (آيدي مستخدم / كمية / باقات)
+    elif _is_admin(user.id) and user.id in admin_wallet.AWAITING_WALLET:
+        if await admin_wallet.handle_wallet_text(update, context):
+            return
+
     # اذا الأدمن ينتظر منه نص تعديل رسالة
     elif _is_admin(user.id) and user.id in AWAITING_MESSAGE_EDIT:
         key = AWAITING_MESSAGE_EDIT.pop(user.id)
@@ -1085,12 +1150,12 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
         if db.is_platform_disabled("wechat"):
             await update.message.reply_text(db.get_message("platform_disabled", lang))
             return
-        if not wechat.is_configured():
-            await update.message.reply_text("تحميل ويشات مو مفعّل حالياً 🙏" if lang == "ar" else "WeChat downloads aren't enabled right now 🙏")
+        if not wechat.is_configured() or not db.get_setting("wechat_fallback_enabled", True):
+            await update.message.reply_text(db.get_message("wechat_disabled", lang))
             return
-        if not _is_admin(user.id):
-            db.log_link(user.id, user.username or "", "wechat", url)
-        await _handle_wechat(update, context, url, fail_count)
+        # ويشات ما عندها yt-dlp: هي دائماً "المحاولة البديلة" (TikHub + فك التشفير)،
+        # فنعرض تأكيد الخصم/الشراء مباشرة من أول رابط.
+        await _show_fallback_prompt(context, update.effective_chat.id, user, url, "wechat")
         return
 
     if db.is_platform_disabled(platform):
@@ -1135,30 +1200,33 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
 RETRY_PENDING: dict[str, tuple[str, str, int]] = {}
 
 
-FALLBACK_CAPABLE_PLATFORMS = {"douyin", "rednote"}
+FALLBACK_CAPABLE_PLATFORMS = {"douyin", "rednote", "wechat"}
 
 
 def _retry_keyboard(url: str, platform: str, fail_count: int = 1) -> InlineKeyboardMarkup:
     """يبني كيبورد الأزرار حسب عدد الفشل المتتالي لنفس الرابط:
-    - فشلة أولى: زرين (🔄 أعد المحاولة / ❌ إلغاء)
-    - فشلة ثانية فأكثر (بمنصة تدعم محاولة بديلة مفعّلة): زرين (🔀 محاولة بديلة / ❌ إلغاء) بدون زر إعادة المحاولة
-    - فشلة ثانية فأكثر (بمنصة ما تدعم محاولة بديلة): يبقى زر إعادة المحاولة + إلغاء"""
+    - دويين/RedNote/ويشات (منصات المحاولة البديلة المفعّلة):
+        فشلة أولى:  🔀 محاولة بديلة + 🔄 أعد المحاولة + ❌ إلغاء
+        فشلة ثانية فأكثر: 🔀 محاولة بديلة + ❌ إلغاء (يختفي زر الإعادة)
+    - باقي المنصات (X، Bilibili): 🔄 أعد المحاولة + ❌ إلغاء كما كان.
+    ملاحظة: yt-dlp يبقى أول محاولة دائماً، هذا التعديل بس للأزرار اللي تطلع بعد ما يفشل."""
     retry_id = uuid.uuid4().hex[:10]
     RETRY_PENDING[retry_id] = (url, platform, fail_count)
 
     show_fallback = (
-        fail_count >= 2
-        and platform in FALLBACK_CAPABLE_PLATFORMS
+        platform in FALLBACK_CAPABLE_PLATFORMS
         and tikhub.is_configured()
+        and (platform != "wechat" or wechat.is_configured())
         and db.get_setting(f"{platform}_fallback_enabled", True)
     )
+    # ويشات ما عندها yt-dlp اصلاً، فالإعادة عندها معناها نفس الطريقة (مفيدة لو Render كان نايم)
+    show_retry = (fail_count <= 1) if show_fallback else True
 
     buttons = []
     if show_fallback:
         buttons.append([InlineKeyboardButton("🔀 محاولة بديلة", callback_data=f"fallback:{retry_id}")])
-    else:
+    if show_retry:
         buttons.append([InlineKeyboardButton("🔄 أعد المحاولة", callback_data=f"retry:{retry_id}")])
-
     buttons.append([InlineKeyboardButton("❌ إلغاء العملية", callback_data=f"cancelop:{retry_id}")])
     return InlineKeyboardMarkup(buttons)
 
@@ -1238,6 +1306,14 @@ async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _process_single_link(fake_update, context, user, platform, url, fail_count)
 
 
+def _fallback_download(platform: str, url: str):
+    """ينفذ التحميل البديل لمنصة معينة (دالة متزامنة، تشتغل بـ asyncio.to_thread).
+    يرجع (path, meta). ويشات: TikHub + فك التشفير. دويين/RedNote: TikHub مباشرة."""
+    if platform == "wechat":
+        return wechat.download_and_decrypt(url)
+    return getattr(tikhub, FALLBACK_DOWNLOAD_FUNCS[platform])(url)
+
+
 FALLBACK_DOWNLOAD_FUNCS = {
     "douyin": "download_douyin_via_api",
     "rednote": "download_rednote_via_api",
@@ -1247,8 +1323,71 @@ FALLBACK_DOWNLOAD_FUNCS = {
 FALLBACK_CONFIRM_PENDING: dict[str, tuple[str, str]] = {}
 
 
+def _fallback_supported(platform: str) -> bool:
+    return platform in FALLBACK_DOWNLOAD_FUNCS or platform == "wechat"
+
+
+async def _show_fallback_prompt(context, chat_id: int, user, url: str, platform: str, edit_message=None):
+    """يعرض رسالة المحاولة البديلة حسب وضع المستخدم (3 حالات):
+       1) الدفع موقف          -> السلوك القديم (مجاني متبقي فقط، بدون شراء)
+       2) عنده رصيد/مجاني     -> تأكيد مع تفصيل الرصيدين (المجاني + المدفوع)
+       3) ما عنده شي          -> زر شراء
+    الأدمن مجاني دائماً: يتخطى كل هذا ويروح مباشرة لتأكيد بسيط."""
+    lang = _lang(user.id)
+    pname = payments.pname(platform, lang)
+    is_admin = _is_admin(user.id)
+
+    avail = wallet.availability(user.id, platform)
+    pay_on = wallet.payments_enabled(platform)
+
+    def _cancel_btn(cid):
+        return InlineKeyboardButton("❌ إلغاء" if lang == "ar" else "❌ Cancel", callback_data=f"fbcancel:{cid}")
+
+    confirm_id = uuid.uuid4().hex[:10]
+    use_label = "✅ استخدم المحاولة" if lang == "ar" else "✅ Use this method"
+
+    if is_admin:
+        FALLBACK_CONFIRM_PENDING[confirm_id] = (url, platform)
+        text = ("🔀 *المحاولة البديلة*\n\nأنت أدمن: مجاني وما ينخصم منك شي ✅" if lang == "ar"
+                else "🔀 *Alternative method*\n\nYou're an admin: free, nothing is deducted ✅")
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton(use_label, callback_data=f"fbconfirm:{confirm_id}")],
+                                       [_cancel_btn(confirm_id)]])
+
+    elif avail["can_use"]:
+        FALLBACK_CONFIRM_PENDING[confirm_id] = (url, platform)
+        text = db.get_message(
+            "fallback_confirm", lang,
+            platform=pname, free_left=avail["free_left"], paid_balance=avail["paid"],
+        )
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton(use_label, callback_data=f"fbconfirm:{confirm_id}")],
+                                       [_cancel_btn(confirm_id)]])
+
+    elif pay_on:
+        # ما عنده شي: نعرض زر شراء، ونحفظ الرابط حتى نكمل تلقائياً بعد الدفع
+        payments.RESUME_AFTER_PURCHASE[user.id] = (url, platform)
+        text = db.get_message("fallback_no_credit", lang, platform=pname)
+        buy_label = (f"🛒 اشتري تحميلات {pname}" if lang == "ar" else f"🛒 Buy {pname} downloads")
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton(buy_label, callback_data=f"buy:plat:{platform}")],
+            [_cancel_btn(confirm_id)],
+        ])
+
+    else:
+        # الدفع موقف: نفس السلوك القديم - "وصلت للحد" بدون خيار شراء
+        text = db.get_message("fallback_limit_reached", lang, limit=wallet.get_weekly_free_limit(platform))
+        markup = None
+
+    try:
+        if edit_message is not None:
+            await edit_message.edit_text(text, reply_markup=markup)
+        else:
+            await context.bot.send_message(chat_id, text, reply_markup=markup)
+    except Exception:
+        await context.bot.send_message(chat_id, text, reply_markup=markup)
+
+
 async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """يعالج زر 'محاولة بديلة' - يعرض تأكيد أول (يوضح إنها مدفوعة مستقبلاً + عدد المحاولات المتبقية)."""
+    """يعالج زر 'محاولة بديلة' - يعرض التأكيد (او الشراء لو ما عنده رصيد)."""
     query = update.callback_query
     await query.answer()
     lang = _lang(query.from_user.id)
@@ -1266,7 +1405,7 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url, platform, _fail_count = pending
     user = query.from_user
 
-    if platform not in FALLBACK_DOWNLOAD_FUNCS:
+    if not _fallback_supported(platform):
         return
 
     if not db.get_setting(f"{platform}_fallback_enabled", True):
@@ -1274,34 +1413,7 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer(alert, show_alert=True)
         return
 
-    weekly_limit = _get_limit_value(f"{platform}_fallback_weekly_limit")
-    current_usage = db.get_fallback_usage(user.id, platform)
-    remaining = max(weekly_limit - current_usage, 0)
-
-    if remaining <= 0:
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-        await context.bot.send_message(
-            query.message.chat_id, db.get_message("fallback_limit_reached", lang, limit=weekly_limit)
-        )
-        return
-
-    confirm_id = uuid.uuid4().hex[:10]
-    FALLBACK_CONFIRM_PENDING[confirm_id] = (url, platform)
-
-    text = db.get_message("fallback_confirm", lang, remaining=remaining, limit=weekly_limit)
-    use_label = "✅ استخدم المحاولة" if lang == "ar" else "✅ Use this method"
-    cancel_label = "❌ إلغاء" if lang == "ar" else "❌ Cancel"
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton(use_label, callback_data=f"fbconfirm:{confirm_id}")],
-        [InlineKeyboardButton(cancel_label, callback_data=f"fbcancel:{confirm_id}")],
-    ])
-    try:
-        await query.edit_message_text(text, reply_markup=buttons)
-    except Exception:
-        await context.bot.send_message(query.message.chat_id, text, reply_markup=buttons)
+    await _show_fallback_prompt(context, query.message.chat_id, user, url, platform, edit_message=query.message)
 
 
 async def handle_fallback_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1312,9 +1424,121 @@ async def handle_fallback_cancel(update: Update, context: ContextTypes.DEFAULT_T
         _, confirm_id = query.data.split(":", 1)
     except ValueError:
         return
-    FALLBACK_CONFIRM_PENDING.pop(confirm_id, None)
+    pending = FALLBACK_CONFIRM_PENDING.pop(confirm_id, None)
+    if pending:
+        payments.RESUME_AFTER_PURCHASE.pop(query.from_user.id, None)
+    else:
+        payments.RESUME_AFTER_PURCHASE.pop(query.from_user.id, None)
     try:
         await query.message.delete()
+    except Exception:
+        pass
+
+
+async def _run_fallback_download(update, context, user, chat_id: int, url: str, platform: str):
+    """ينفذ المحاولة البديلة فعلياً. الخصم يصير بعد نجاح الإرسال (مو قبل)."""
+    lang = _lang(user.id)
+    status = await context.bot.send_message(chat_id, db.get_message("fallback_retrying", lang))
+    files = []
+    try:
+        # نتحقق مرة ثانية قبل التنفيذ (الرصيد ممكن تغير بين التأكيد والضغط)
+        if not _is_admin(user.id) and not wallet.availability(user.id, platform)["can_use"]:
+            await status.delete()
+            await _show_fallback_prompt(context, chat_id, user, url, platform)
+            return
+
+        path, meta = await asyncio.to_thread(_fallback_download, platform, url)
+        files = [path]
+
+        if not _check_size_ok(files):
+            await status.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
+            return
+
+        await status.delete()
+
+        sticker_msg = await _show_upload_sticker(context, chat_id, platform)
+        try:
+            for f in files:
+                await _send_file(update, context, f, chat_id=chat_id)
+        except Exception:
+            await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
+            raise
+        await _resolve_upload_sticker_success(sticker_msg)
+
+        # الخصم بعد نجاح الإرسال الفعلي فقط. الأدمن ما ينخصم منه شي.
+        if not _is_admin(user.id):
+            wallet.consume(user.id, platform, url)
+            db.log_link(user.id, user.username or "", platform, url)
+        _record_download_success(platform)
+
+        try:
+            await _send_post_info(context, chat_id, user.id, meta, len(files))
+        except Exception:
+            logger.exception("failed to send post info after successful fallback upload (ignored)")
+
+        await _maybe_low_balance_hint(context, chat_id, user, platform)
+        try:
+            await _check_tikhub_balance(context)
+        except Exception:
+            logger.exception("tikhub balance check failed (ignored)")
+    except Exception as e:
+        logger.exception(f"{platform} fallback download failed")
+        text = db.get_message("fallback_failed", lang, error=str(e))
+        try:
+            await status.edit_text(text)
+            fail_msg = status
+        except Exception:
+            fail_msg = await context.bot.send_message(chat_id, text)
+        seconds = _get_limit_value("fallback_failure_autodelete_sec")
+        if db.get_setting("fallback_failure_autodelete_enabled", False):
+            await _schedule_auto_delete_seconds(context, chat_id, fail_msg.message_id, seconds)
+    finally:
+        downloader.cleanup(files)
+
+
+_LAST_TIKHUB_ALERT = {"ts": 0.0}
+
+
+async def _check_tikhub_balance(context):
+    """ينبه الأدمن (بالقناة) لو رصيد TikHub نزل تحت الحد. مرة كل 6 ساعات كحد أقصى حتى ما يزعج."""
+    import time
+    if not tikhub.is_configured():
+        return
+    if time.time() - _LAST_TIKHUB_ALERT["ts"] < 6 * 3600:
+        return
+    usage = await asyncio.to_thread(tikhub.get_usage)
+    if not usage:
+        return
+    threshold = _get_limit_value("low_tikhub_balance_usd")
+    bal = float(usage.get("balance") or 0) + float(usage.get("free_credit") or 0)
+    if bal < threshold:
+        _LAST_TIKHUB_ALERT["ts"] = time.time()
+        await payments.notify(
+            context,
+            f"⚠️ *رصيد TikHub منخفض*\nالرصيد: ${bal:.3f} (الحد: ${threshold})\n"
+            "اشحن رصيدك حتى ما تتوقف المحاولة البديلة عن المستخدمين.",
+            markdown=True,
+        )
+
+
+async def _maybe_low_balance_hint(context, chat_id: int, user, platform: str):
+    """تنبيه لطيف للمستخدم لما يبقى له تحميل وحد او خلص رصيده (يشجع الشراء بدون إزعاج)."""
+    if _is_admin(user.id) or not wallet.payments_enabled(platform):
+        return
+    a = wallet.availability(user.id, platform)
+    lang = _lang(user.id)
+    total = a["free_left"] + a["paid"]
+    if total > 1:
+        return
+    pname = payments.pname(platform, lang)
+    if total == 1:
+        text = (f"ℹ️ باقي لك تحميل واحد بالمحاولة البديلة ({pname})." if lang == "ar"
+                else f"ℹ️ You have 1 alternative-method download left ({pname}).")
+    else:
+        text = (f"ℹ️ خلص رصيدك بالمحاولة البديلة ({pname}). تكدر تشتري تحميلات بـ /buy ⭐" if lang == "ar"
+                else f"ℹ️ You're out of alternative-method downloads ({pname}). Use /buy to top up ⭐")
+    try:
+        await context.bot.send_message(chat_id, text)
     except Exception:
         pass
 
@@ -1344,52 +1568,25 @@ async def handle_fallback_confirm(update: Update, context: ContextTypes.DEFAULT_
     except Exception:
         pass
 
-    status = await context.bot.send_message(chat_id, db.get_message("fallback_retrying", lang))
+    await _run_fallback_download(update, context, user, chat_id, url, platform)
 
-    download_func = getattr(tikhub, FALLBACK_DOWNLOAD_FUNCS[platform])
 
-    files = []
-    try:
-        path, meta = await asyncio.to_thread(download_func, url)
-        files = [path]
+async def _resume_after_purchase(update, context, url: str, platform: str):
+    """يُستدعى تلقائياً بعد نجاح الدفع: يكمل تحميل الرابط اللي كان ينتظر بدون ما المستخدم يعيد إرساله."""
+    user = update.effective_user
+    await _run_fallback_download(update, context, user, update.effective_chat.id, url, platform)
 
-        if not _check_size_ok(files):
-            await status.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
-            return
 
-        db.increment_fallback_usage(user.id, platform)
-        if not _is_admin(user.id):
-            db.log_link(user.id, user.username or "", platform, url)
+async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _clear_awaiting_states(update.effective_user.id)
+    await payments.show_shop(update, context)
 
-        await status.delete()
 
-        sticker_msg = await _show_upload_sticker(context, chat_id, platform)
-        try:
-            for path in files:
-                await _send_file(update, context, path)
-        except Exception:
-            await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
-            raise
-        await _resolve_upload_sticker_success(sticker_msg)
-        _record_download_success(platform)
-
-        try:
-            await _send_post_info(context, chat_id, user.id, meta, len(files))
-        except Exception:
-            logger.exception("failed to send post info after successful fallback upload (ignored)")
-    except Exception as e:
-        logger.exception(f"{platform} fallback download failed")
-        text = db.get_message("fallback_failed", lang, error=str(e))
-        try:
-            await status.edit_text(text)
-            fail_msg = status
-        except Exception:
-            fail_msg = await context.bot.send_message(chat_id, text)
-        seconds = _get_limit_value("fallback_failure_autodelete_sec")
-        if db.get_setting("fallback_failure_autodelete_enabled", False):
-            await _schedule_auto_delete_seconds(context, chat_id, fail_msg.message_id, seconds)
-    finally:
-        downloader.cleanup(files)
+async def paysupport_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أمر مطلوب من تليگرام لأي بوت يبيع بالنجوم."""
+    lang = _lang(update.effective_user.id)
+    text = db.get_message("paysupport", lang)
+    await update.message.reply_text(text)
 
 
 async def handle_cancel_op(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1611,52 +1808,6 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
             _release_heavy_slot()
 
 
-async def _handle_wechat(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, fail_count: int = 0):
-    chat_id = update.effective_chat.id
-    lang = _lang(update.effective_user.id)
-    msg = await update.message.reply_text("⬇️ جاري التحميل من ويشات..." if lang == "ar" else "⬇️ Downloading from WeChat...")
-    await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
-
-    files = []
-    took_heavy_slot = False
-    try:
-        path, meta = await asyncio.to_thread(wechat.download_and_decrypt, url)
-        files = [path]
-
-        if not _check_size_ok(files):
-            await msg.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
-            return
-
-        if _total_size(files) >= _heavy_threshold_bytes():
-            await _acquire_heavy_slot(update, context, chat_id)
-            took_heavy_slot = True
-
-        await msg.delete()
-
-        sticker_msg = await _show_upload_sticker(context, chat_id, "wechat")
-        try:
-            for path in files:
-                await _send_file(update, context, path)
-        except Exception:
-            await _resolve_upload_sticker_error(context, chat_id, "wechat", sticker_msg)
-            raise
-        await _resolve_upload_sticker_success(sticker_msg)
-        _record_download_success("wechat")
-
-        try:
-            await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
-        except Exception:
-            logger.exception("failed to send post info after successful wechat upload (ignored)")
-    except Exception as e:
-        logger.exception("wechat download failed")
-        await _record_download_failure(context, "wechat", str(e))
-        await _send_error_with_retry(context, chat_id, msg, str(e), url, "wechat", fail_count + 1, lang)
-    finally:
-        downloader.cleanup(files)
-        if took_heavy_slot:
-            _release_heavy_slot()
-
-
 async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1790,6 +1941,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("deeplink", deeplink_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("buy", buy_command))
+    app.add_handler(CommandHandler("paysupport", paysupport_command))
     app.add_handler(CommandHandler("ban", ban_command))
     app.add_handler(CommandHandler("unban", unban_command))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^adm:"))
@@ -1797,6 +1950,9 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(handle_audio_request, pattern=r"^aud:"))
     app.add_handler(CallbackQueryHandler(handle_pref_toggle, pattern=r"^pref:"))
     app.add_handler(CallbackQueryHandler(handle_language_choice, pattern=r"^setlang:"))
+    app.add_handler(CallbackQueryHandler(payments.handle_buy_callback, pattern=r"^buy:"))
+    app.add_handler(PreCheckoutQueryHandler(payments.handle_pre_checkout))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, payments.handle_successful_payment))
     app.add_handler(CallbackQueryHandler(handle_retry, pattern=r"^retry:"))
     app.add_handler(CallbackQueryHandler(handle_fallback, pattern=r"^fallback:"))
     app.add_handler(CallbackQueryHandler(handle_fallback_confirm, pattern=r"^fbconfirm:"))
@@ -1805,4 +1961,5 @@ def build_application() -> Application:
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_admin_sticker))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    payments.set_resume_callback(_resume_after_purchase)
     return app
