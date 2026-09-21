@@ -34,6 +34,18 @@ def set_resume_callback(fn):
     _resume_callback = fn
 
 
+async def _send_md(send_fn, *args, **kwargs):
+    """يرسل بـ Markdown، ولو الأدمن كسر الرموز بتعديل رسالة (نجمة غير مغلقة) يرسل نص عادي بدل ما ينهار."""
+    from telegram.error import BadRequest
+    try:
+        return await send_fn(*args, parse_mode="Markdown", **kwargs)
+    except BadRequest as e:
+        if "parse entities" in str(e).lower():
+            args = tuple(a.replace("*", "").replace("`", "") if isinstance(a, str) else a for a in args)
+            return await send_fn(*args, **kwargs)
+        raise
+
+
 def pname(platform: str, lang: str) -> str:
     return PLATFORM_NAMES.get(lang, PLATFORM_NAMES["ar"]).get(platform, platform)
 
@@ -49,19 +61,16 @@ def platforms_menu(lang: str) -> InlineKeyboardMarkup:
     for p in wallet.PAID_PLATFORMS:
         if wallet.payments_enabled(p):
             rows.append([InlineKeyboardButton(pname(p, lang), callback_data=f"buy:plat:{p}")])
-    rows.append([InlineKeyboardButton("❌ إغلاق" if lang == "ar" else "❌ Close", callback_data="buy:close")])
+    rows.append([InlineKeyboardButton(db.get_message("btn_close", lang), callback_data="buy:close")])
     return InlineKeyboardMarkup(rows)
 
 
 def packages_menu(platform: str, lang: str) -> InlineKeyboardMarkup:
     rows = []
     for i, pkg in enumerate(wallet.get_packages(platform)):
-        if lang == "ar":
-            label = f"{pkg['credits']} تحميل — {pkg['stars']} ⭐"
-        else:
-            label = f"{pkg['credits']} downloads — {pkg['stars']} ⭐"
+        label = db.get_message("btn_package", lang, credits=pkg["credits"], stars=pkg["stars"])
         rows.append([InlineKeyboardButton(label, callback_data=f"buy:pkg:{platform}:{i}")])
-    rows.append([InlineKeyboardButton("⬅️ رجوع" if lang == "ar" else "⬅️ Back", callback_data="buy:menu")])
+    rows.append([InlineKeyboardButton(db.get_message("btn_back", lang), callback_data="buy:menu")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -69,10 +78,8 @@ def _balances_text(user_id: int, lang: str) -> str:
     lines = []
     for p in wallet.PAID_PLATFORMS:
         a = wallet.availability(user_id, p)
-        if lang == "ar":
-            lines.append(f"• {pname(p, lang)}: 🎁 {a['free_left']} مجانية | 💎 {a['paid']} مدفوعة")
-        else:
-            lines.append(f"• {pname(p, lang)}: 🎁 {a['free_left']} free | 💎 {a['paid']} paid")
+        lines.append(db.get_message("stats_balance_line", lang, platform=pname(p, lang),
+                                    free=a["free_left"], paid=a["paid"]).strip("\n"))
     return "\n".join(lines)
 
 
@@ -83,17 +90,16 @@ async def show_shop(update: Update, context: ContextTypes.DEFAULT_TYPE, resume: 
     chat_id = update.effective_chat.id
 
     if not wallet.payments_enabled():
-        msg = "🚫 الشراء متوقف حالياً." if lang == "ar" else "🚫 Purchases are currently disabled."
-        await context.bot.send_message(chat_id, msg)
+        await context.bot.send_message(chat_id, db.get_message("shop_disabled", lang))
         return
 
     if resume:
         RESUME_AFTER_PURCHASE[user.id] = resume
 
-    head = "🛒 *شراء تحميلات بالنجوم ⭐*" if lang == "ar" else "🛒 *Buy downloads with Stars ⭐*"
-    pick = "اختار المنصة 👇" if lang == "ar" else "Choose a platform 👇"
+    head = db.get_message("shop_title", lang)
+    pick = db.get_message("shop_pick_platform", lang)
     text = f"{head}\n\n{_balances_text(user.id, lang)}\n\n{pick}"
-    await context.bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=platforms_menu(lang))
+    await _send_md(context.bot.send_message, chat_id, text, reply_markup=platforms_menu(lang))
 
 
 # ---------- معالجة أزرار المتجر ----------
@@ -113,16 +119,14 @@ async def handle_buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if not wallet.payments_enabled():
-        await query.answer("🚫 الشراء متوقف حالياً" if lang == "ar" else "🚫 Purchases are disabled", show_alert=True)
+        await query.answer(db.get_message("shop_disabled", lang), show_alert=True)
         return
 
     if data == "buy:menu":
-        head = "🛒 *شراء تحميلات بالنجوم ⭐*" if lang == "ar" else "🛒 *Buy downloads with Stars ⭐*"
-        pick = "اختار المنصة 👇" if lang == "ar" else "Choose a platform 👇"
-        await query.edit_message_text(
-            f"{head}\n\n{_balances_text(user.id, lang)}\n\n{pick}",
-            parse_mode="Markdown", reply_markup=platforms_menu(lang),
-        )
+        head = db.get_message("shop_title", lang)
+        pick = db.get_message("shop_pick_platform", lang)
+        await _send_md(query.edit_message_text, f"{head}\n\n{_balances_text(user.id, lang)}\n\n{pick}",
+                       reply_markup=platforms_menu(lang))
         return
 
     if data.startswith("buy:plat:"):
@@ -130,11 +134,9 @@ async def handle_buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if platform not in wallet.PAID_PLATFORMS or not wallet.payments_enabled(platform):
             await query.answer("🚫", show_alert=True)
             return
-        title = (f"📦 *باقات {pname(platform, lang)}*" if lang == "ar"
-                 else f"📦 *{pname(platform, lang)} packages*")
-        pick = "اختار الباقة 👇" if lang == "ar" else "Choose a package 👇"
-        await query.edit_message_text(f"{title}\n\n{pick}", parse_mode="Markdown",
-                                      reply_markup=packages_menu(platform, lang))
+        title = db.get_message("shop_platform_title", lang, platform=pname(platform, lang))
+        pick = db.get_message("shop_pick_package", lang)
+        await _send_md(query.edit_message_text, f"{title}\n\n{pick}", reply_markup=packages_menu(platform, lang))
         return
 
     if data.startswith("buy:pkg:"):
@@ -150,12 +152,8 @@ async def handle_buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         name = pname(platform, lang)
-        if lang == "ar":
-            title = f"{pkg['credits']} تحميل - {name}"
-            desc = f"رصيد دائم: {pkg['credits']} تحميل بالمحاولة البديلة لمنصة {name}."
-        else:
-            title = f"{pkg['credits']} downloads - {name}"
-            desc = f"Permanent credit: {pkg['credits']} alternative-method downloads for {name}."
+        title = db.get_message("invoice_title", lang, credits=pkg["credits"], platform=name)
+        desc = db.get_message("invoice_desc", lang, credits=pkg["credits"], platform=name)
 
         # payload قصير ≤128 بايت. نتحقق منه مرة ثانية عند الدفع.
         payload = f"buy:{platform}:{idx}:{user.id}:{uuid.uuid4().hex[:6]}"
@@ -169,7 +167,7 @@ async def handle_buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         except Exception:
             logger.exception("failed to send invoice")
-            await query.answer("⚠️ تعذر إنشاء الفاتورة" if lang == "ar" else "⚠️ Could not create invoice", show_alert=True)
+            await query.answer(db.get_message("shop_invoice_error", lang), show_alert=True)
 
 
 # ---------- pre_checkout و successful_payment ----------
@@ -179,31 +177,31 @@ async def handle_pre_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE
     q = update.pre_checkout_query
     lang = _lang(q.from_user.id)
 
-    async def reject(msg_ar, msg_en):
-        await q.answer(ok=False, error_message=msg_ar if lang == "ar" else msg_en)
+    async def reject(key):
+        await q.answer(ok=False, error_message=db.get_message(key, lang))
 
     try:
         parts = q.invoice_payload.split(":")
         if len(parts) < 4 or parts[0] != "buy":
-            await reject("فاتورة غير صالحة.", "Invalid invoice.")
+            await reject("pay_invalid_invoice")
             return
         _, platform, idx, uid = parts[:4]
         if int(uid) != q.from_user.id or q.currency != "XTR":
-            await reject("فاتورة غير صالحة.", "Invalid invoice.")
+            await reject("pay_invalid_invoice")
             return
         if platform not in wallet.PAID_PLATFORMS or not wallet.payments_enabled(platform):
-            await reject("الشراء متوقف حالياً لهذه المنصة.", "Purchases are disabled for this platform.")
+            await reject("pay_platform_disabled")
             return
         pkg = wallet.get_packages(platform)[int(idx)]
         if int(pkg["stars"]) != q.total_amount:
-            await reject("تغير السعر، افتح المتجر من جديد.", "The price changed, please reopen the shop.")
+            await reject("pay_price_changed")
             return
         if not db.is_connected():
-            await reject("الخدمة غير متاحة حالياً، حاول بعد شوي.", "Service unavailable, try again shortly.")
+            await reject("pay_unavailable")
             return
     except Exception:
         logger.exception("pre_checkout validation failed")
-        await reject("صار خطأ، حاول مرة ثانية.", "Something went wrong, please try again.")
+        await reject("pay_error")
         return
 
     await q.answer(ok=True)
@@ -224,8 +222,7 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
         logger.exception("successful_payment with bad payload: %s", pay.invoice_payload)
         await _notify(context, f"🚨 دفعة بـ payload غير مفهوم!\nالمستخدم: {user.id}\n"
                                f"النجوم: {pay.total_amount}\ncharge_id: `{pay.telegram_payment_charge_id}`")
-        await msg.reply_text("تم استلام دفعتك، وراح نتواصل وياك لإضافة الرصيد. 🙏" if lang == "ar"
-                             else "Payment received, we'll contact you to add your credit. 🙏")
+        await msg.reply_text(db.get_message("pay_unknown_payload", lang))
         return
 
     ok, balance = wallet.add_purchase(
@@ -236,10 +233,7 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
         return
 
     name = pname(platform, lang)
-    if lang == "ar":
-        text = f"✅ تم الدفع!\nأُضيف {credits} تحميل لرصيد {name}.\n💎 رصيدك الحالي: {balance}"
-    else:
-        text = f"✅ Payment successful!\n{credits} downloads added to your {name} balance.\n💎 Current balance: {balance}"
+    text = db.get_message("pay_success", lang, credits=credits, platform=name, balance=balance)
     await msg.reply_text(text)
 
     uname = f"@{user.username}" if user.username else "—"
@@ -262,27 +256,69 @@ async def handle_successful_payment(update: Update, context: ContextTypes.DEFAUL
             logger.exception("auto-resume after purchase failed")
 
 
-# ---------- الإشعارات (قناة الأدمن) ----------
+# ---------- الإشعارات (لكل نوع وجهته: قناة او خاص) ----------
+
+# أنواع الإشعارات. كل نوع يتحدد له من /admin: "channel" او "private".
+NOTIFY_KINDS = {
+    "new_user": "🆕 مستخدم جديد",
+    "purchase": "💰 عمليات الشراء والاسترجاع",
+    "tikhub": "⚠️ رصيد TikHub المنخفض",
+    "failure": "🚨 تنبيه فشل متتالي بمنصة",
+}
+# الافتراضي: القناة لو مضبوطة، وإلا الخاص (حتى ما تضيع إشعارات لو ما ضبطت القناة)
+_DEFAULT_ROUTE = "channel"
+
+
+def get_route(kind: str) -> str:
+    """'channel' او 'private' لهذا النوع (مع رجوع للخاص لو القناة غير مضبوطة)."""
+    route = db.get_setting(f"notify_route_{kind}", _DEFAULT_ROUTE)
+    if route == "channel" and not config.NOTIFY_CHANNEL_ID:
+        return "private"
+    return "private" if route not in ("channel", "private") else route
+
+
+def set_route(kind: str, route: str):
+    if kind in NOTIFY_KINDS and route in ("channel", "private"):
+        db.set_setting(f"notify_route_{kind}", route)
+
+
+def target_for(kind: str):
+    """الآيدي اللي تنرسل له إشعارات هذا النوع."""
+    return config.NOTIFY_CHANNEL_ID if get_route(kind) == "channel" else config.ADMIN_CHAT_ID
+
 
 def notify_target():
-    """القناة إن وُجدت، وإلا الأدمن بالخاص."""
-    return config.NOTIFY_CHANNEL_ID or config.ADMIN_CHAT_ID
+    """للتوافق: وجهة إشعارات الشراء."""
+    return target_for("purchase")
 
 
-async def _notify(context, text: str, markdown: bool = False) -> bool:
-    target = notify_target()
+async def notify(context, text: str, markdown: bool = False, kind: str = "purchase") -> bool:
+    target = target_for(kind)
     if not target:
         return False
     try:
         await context.bot.send_message(target, text, parse_mode="Markdown" if markdown else None)
         return True
     except Exception:
-        logger.exception("failed to send notification to %s", target)
+        logger.exception("failed to send %s notification to %s", kind, target)
         return False
 
 
-async def notify(context, text: str, markdown: bool = False) -> bool:
-    return await _notify(context, text, markdown)
+async def notify_photo(context, kind: str, photo, caption: str) -> bool:
+    """يرسل صورة+كابشن (لإشعار المستخدم الجديد) للوجهة المختارة لهذا النوع."""
+    target = target_for(kind)
+    if not target:
+        return False
+    try:
+        await context.bot.send_photo(target, photo, caption=caption)
+        return True
+    except Exception:
+        logger.exception("failed to send %s photo notification to %s", kind, target)
+        return False
+
+
+async def _notify(context, text: str, markdown: bool = False) -> bool:
+    return await notify(context, text, markdown, kind="purchase")
 
 
 # ---------- الاسترجاع (أدمن) ----------
