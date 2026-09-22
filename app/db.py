@@ -65,12 +65,12 @@ DEFAULT_MESSAGES = {
         "en": "⬇️ Downloading at the best quality...",
     },
     "download_error": {
-        "ar": "صار خطأ بالتحميل ❌\n{error}",
-        "en": "A download error occurred ❌\n{error}",
+        "ar": "صار خطأ بالتحميل ❌\nجرب مرة ثانية، وإذا استمرت المشكلة اضغط الزر تحت للإبلاغ.",
+        "en": "A download error occurred ❌\nTry again, and if it keeps happening tap the button below to report it.",
     },
     "post_info_error": {
-        "ar": "صار خطأ بجلب معلومات المنشور ❌\n{error}",
-        "en": "Failed to fetch post info ❌\n{error}",
+        "ar": "صار خطأ بجلب معلومات المنشور ❌",
+        "en": "Failed to fetch post info ❌",
     },
     "post_info_template": {
         "ar": (
@@ -89,8 +89,8 @@ DEFAULT_MESSAGES = {
         ),
     },
     "quality_fetch_error": {
-        "ar": "ما گدرت اجيب معلومات الرابط ❌\n{error}",
-        "en": "Couldn't fetch link info ❌\n{error}",
+        "ar": "ما گدرت اجيب معلومات الرابط ❌\nجرب مرة ثانية، وإذا استمرت المشكلة اضغط الزر تحت للإبلاغ.",
+        "en": "Couldn't fetch link info ❌\nTry again, and if it keeps happening tap the button below to report it.",
     },
     "expired_request": {
         "ar": "انتهت صلاحية هذا الطلب، ارسل الرابط مرة اخرى 🔄",
@@ -127,8 +127,8 @@ DEFAULT_MESSAGES = {
         "en": "🔄 Retrying with an alternative method...",
     },
     "fallback_failed": {
-        "ar": "❌ فشلت المحاولة البديلة بعد.\n{error}",
-        "en": "❌ The alternative method also failed.\n{error}",
+        "ar": "❌ فشلت المحاولة البديلة بعد.\nما انخصم شي من رصيدك ✅\nجرب مرة ثانية، وإذا استمرت المشكلة اضغط الزر تحت للإبلاغ.",
+        "en": "❌ The alternative method also failed.\nNothing was deducted from your balance ✅\nTry again, and if it keeps happening tap the button below to report it.",
     },
     "fallback_limit_reached": {
         "ar": (
@@ -404,6 +404,48 @@ DEFAULT_MESSAGES = {
     "post_no_handle": {"ar": "بدون يوزر", "en": "no handle"},
     "post_no_desc": {"ar": "بدون وصف", "en": "no description"},
     "post_count_line": {"ar": "🎞️ عدد المقاطع/الصور: {count}", "en": "🎞️ Number of items: {count}"},
+    "dev_error_report": {
+        "ar": (
+            "🚨 *خطأ - {kind}*\n\n"
+            "👤 المستخدم: `{user_id}` {username}\n"
+            "🌐 المنصة: {platform}\n"
+            "🔗 الرابط: {url}\n\n"
+            "❗️ *الخطأ:*\n`{error}`"
+        ),
+        "en": (
+            "🚨 *Error - {kind}*\n\n"
+            "👤 User: `{user_id}` {username}\n"
+            "🌐 Platform: {platform}\n"
+            "🔗 URL: {url}\n\n"
+            "❗️ *Error:*\n`{error}`"
+        ),
+    },
+    "btn_report_problem": {"ar": "🚨 أبلغ عن المشكلة", "en": "🚨 Report the problem"},
+    "btn_seen": {"ar": "✅ شفتها", "en": "✅ Seen"},
+    "report_ask": {
+        "ar": "✍️ اكتب المشكلة اللي صارت وياك هسه، وراح ارسلها للفريق مباشرة.",
+        "en": "✍️ Write the problem you're facing now, and I'll send it straight to the team.",
+    },
+    "report_sent": {
+        "ar": "✅ توصلت شكواك، شكراً الك. راح نراجعها بأقرب وقت 🙏",
+        "en": "✅ Your report was received, thank you. We'll review it soon 🙏",
+    },
+    "user_report": {
+        "ar": (
+            "🚨 *بلاغ مشكلة من مستخدم*\n\n"
+            "👤 المستخدم: `{user_id}` {username}\n"
+            "🌐 السياق: {platform} — {url}\n"
+            "❗️ الخطأ الأصلي: `{error}`\n\n"
+            "💬 *رسالة المستخدم:*\n{message}"
+        ),
+        "en": (
+            "🚨 *User problem report*\n\n"
+            "👤 User: `{user_id}` {username}\n"
+            "🌐 Context: {platform} — {url}\n"
+            "❗️ Original error: `{error}`\n\n"
+            "💬 *User's message:*\n{message}"
+        ),
+    },
 }
 
 
@@ -417,6 +459,22 @@ LEGACY_MESSAGES = {
         "en": [
             "🔀 *Alternative Method*\n\nThis method works 100%, but it will become paid in the future.\nYou currently have {remaining} of {limit} free attempts left this week.\n\nDo you want to use it?",
         ],
+    },
+    "download_error": {
+        "ar": ["صار خطأ بالتحميل ❌\n{error}"],
+        "en": ["A download error occurred ❌\n{error}"],
+    },
+    "post_info_error": {
+        "ar": ["صار خطأ بجلب معلومات المنشور ❌\n{error}"],
+        "en": ["Failed to fetch post info ❌\n{error}"],
+    },
+    "quality_fetch_error": {
+        "ar": ["ما گدرت اجيب معلومات الرابط ❌\n{error}"],
+        "en": ["Couldn't fetch link info ❌\n{error}"],
+    },
+    "fallback_failed": {
+        "ar": ["❌ فشلت المحاولة البديلة بعد.\n{error}"],
+        "en": ["❌ The alternative method also failed.\n{error}"],
     },
 }
 
