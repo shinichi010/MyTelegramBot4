@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from types import SimpleNamespace
 
@@ -373,6 +374,111 @@ async def _safe_markdown(send_fn, text: str, **kwargs):
         raise
 
 
+# آيدي بلاغ قصير -> السياق (المنصة/الرابط/نص الخطأ الحقيقي/نوع الخطأ) لعرضه بتقرير المطور
+# ولإرفاقه لما المستخدم يكتب شكواه. ينتهي صلاحيته بعد ساعة عشان الذاكرة ما تتراكم.
+PENDING_ERROR_REPORTS: dict[str, dict] = {}
+
+# user_id -> report_id: المستخدم بانتظار يكتب نص شكواه بعد ما ضغط زر الإبلاغ
+AWAITING_PROBLEM_REPORT: dict[int, str] = {}
+
+
+async def _report_error_to_dev(context, kind: str, user_id, platform: str, url: str, error: str, username: str = "") -> str:
+    """يسجل الخطأ تلقائياً لقناة/خاص المطور (نوع 'errors')، ويرجع report_id لبناء زر الإبلاغ للمستخدم.
+    user_id يقبل رقم آيدي مباشر او كائن User (نستخرج منه .id/.username تلقائياً)."""
+    if hasattr(user_id, "id"):
+        username = f"@{user_id.username}" if user_id.username else "—"
+        user_id = user_id.id
+    username = username or "—"
+
+    report_id = uuid.uuid4().hex[:10]
+    PENDING_ERROR_REPORTS[report_id] = {
+        "platform": platform, "url": url, "error": error, "kind": kind,
+        "user_id": user_id, "username": username, "ts": time.time(),
+    }
+    # تنظيف بسيط: نحذف البلاغات الأقدم من ساعة حتى القاموس ما يتراكم
+    cutoff = time.time() - 3600
+    for k in [k for k, v in PENDING_ERROR_REPORTS.items() if v["ts"] < cutoff]:
+        PENDING_ERROR_REPORTS.pop(k, None)
+
+    try:
+        await payments.notify(
+            context,
+            db.get_message(
+                "dev_error_report", "ar", kind=kind,
+                user_id=user_id if user_id is not None else "—", username=username,
+                platform=platform or "—", url=url or "—", error=str(error)[:600],
+            ),
+            markdown=True, kind="errors",
+        )
+    except Exception:
+        logger.exception("failed to send dev error report")
+    return report_id
+
+
+def _report_button(report_id: str, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(
+        db.get_message("btn_report_problem", lang), callback_data=f"report:{report_id}"
+    )]])
+
+
+async def handle_report_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """يعالج زر 'أبلغ عن المشكلة' - يطلب من المستخدم يكتب شكواه."""
+    query = update.callback_query
+    await query.answer()
+    lang = _lang(query.from_user.id)
+    try:
+        _, report_id = query.data.split(":", 1)
+    except ValueError:
+        return
+    if report_id not in PENDING_ERROR_REPORTS:
+        await context.bot.send_message(query.message.chat_id, db.get_message("expired_request", lang))
+        return
+    _clear_awaiting_states(query.from_user.id)
+    AWAITING_PROBLEM_REPORT[query.from_user.id] = report_id
+    await context.bot.send_message(query.message.chat_id, db.get_message("report_ask", lang))
+
+
+async def _handle_problem_report_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """يستقبل نص شكوى المستخدم ويحولها للقناة مع السياق التلقائي. يرجع True لو تعامل معها."""
+    user = update.effective_user
+    report_id = AWAITING_PROBLEM_REPORT.pop(user.id, None)
+    if not report_id:
+        return False
+    lang = _lang(user.id)
+    ctx_data = PENDING_ERROR_REPORTS.get(report_id, {})
+    text = db.get_message(
+        "user_report", "ar",
+        user_id=user.id, username=f"@{user.username}" if user.username else "—",
+        platform=ctx_data.get("platform") or "—", url=ctx_data.get("url") or "—",
+        error=str(ctx_data.get("error") or "—")[:400],
+        message=update.message.text or "",
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton(
+        db.get_message("btn_seen", "ar"), callback_data="reportseen:1"
+    )]])
+    target = payments.target_for("errors")
+    if target:
+        try:
+            await context.bot.send_message(target, text, parse_mode="Markdown", reply_markup=markup)
+        except Exception:
+            logger.exception("failed to send user report")
+    await update.message.reply_text(db.get_message("report_sent", lang))
+    return True
+
+
+async def handle_report_seen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """زر 'شفتها' بالقناة/الخاص: يعلّم البلاغ كمقروء باسم الأدمن اللي ضغطه."""
+    query = update.callback_query
+    admin = query.from_user
+    await query.answer("✅")
+    name = admin.full_name or (f"@{admin.username}" if admin.username else str(admin.id))
+    try:
+        await query.edit_message_text(f"✅ شفتها {name}")
+    except Exception:
+        pass
+
+
+
 def _lang(user_id: int) -> str:
     """يجيب لغة المستخدم المحفوظة، افتراضياً عربي لو ما اختار بعد."""
     return db.get_user_language(user_id) or "ar"
@@ -482,7 +588,8 @@ def _clear_awaiting_states(user_id: int) -> bool:
     يرجع True لو كان فيه حالة انتظار فعلاً. تُستدعى بأول كل أمر (/command) حتى
     اي أمر يقطع تلقائياً اي تعديل معلق بدل ما ينحفظ نص الأمر نفسه بالغلط."""
     return (
-        admin_wallet.AWAITING_WALLET.pop(user_id, None) is not None
+        AWAITING_PROBLEM_REPORT.pop(user_id, None) is not None
+        or admin_wallet.AWAITING_WALLET.pop(user_id, None) is not None
         or AWAITING_MESSAGE_EDIT.pop(user_id, None) is not None
         or AWAITING_STICKER_EDIT.pop(user_id, None) is not None
         or AWAITING_LIMIT_EDIT.pop(user_id, None) is not None
@@ -1137,6 +1244,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if raw_text.startswith("/"):
         _clear_awaiting_states(user.id)
 
+    # اذا المستخدم (اي مستخدم، مو بس الأدمن) بانتظار يكتب نص شكوى بعد زر الإبلاغ.
+    # استثناء: لو أرسل رابط منصة مدعوم بدل الشكوى، نعتبره غيّر رأيه ونكمل كتحميل عادي.
+    if user.id in AWAITING_PROBLEM_REPORT and not _extract_all_links(raw_text):
+        if await _handle_problem_report_text(update, context):
+            return
+    elif user.id in AWAITING_PROBLEM_REPORT:
+        AWAITING_PROBLEM_REPORT.pop(user.id, None)
+
     # اذا الأدمن بحالة انتظار لوحة الأرصدة (آيدي مستخدم / كمية / باقات)
     elif _is_admin(user.id) and user.id in admin_wallet.AWAITING_WALLET:
         if await admin_wallet.handle_wallet_text(update, context):
@@ -1329,10 +1444,14 @@ async def _schedule_auto_delete_seconds(context, chat_id: int, message_id: int, 
     asyncio.create_task(_delete_later())
 
 
-async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1, lang: str = "ar"):
-    """يعرض رسالة الخطأ مع زر إعادة المحاولة. يحاول يعدل رسالة موجودة، وإلا يرسل وحدة جديدة."""
-    text = db.get_message("download_error", lang, error=error)
-    keyboard = _retry_keyboard(url, platform, fail_count, lang)
+async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1, lang: str = "ar", user=None):
+    """يعرض رسالة الخطأ مع زر إعادة المحاولة + زر الإبلاغ. يبلغ المطور تلقائياً بالخطأ الحقيقي."""
+    text = db.get_message("download_error", lang)
+    report_id = await _report_error_to_dev(context, "تحميل فيديو", user, platform, url, error)
+    keyboard = InlineKeyboardMarkup(
+        list(_retry_keyboard(url, platform, fail_count, lang).inline_keyboard)
+        + list(_report_button(report_id, lang).inline_keyboard)
+    )
     try:
         await msg.edit_text(text, reply_markup=keyboard)
         sent = msg
@@ -1550,12 +1669,14 @@ async def _run_fallback_download(update, context, user, chat_id: int, url: str, 
             logger.exception("tikhub balance check failed (ignored)")
     except Exception as e:
         logger.exception(f"{platform} fallback download failed")
-        text = db.get_message("fallback_failed", lang, error=str(e))
+        text = db.get_message("fallback_failed", lang)
+        report_id = await _report_error_to_dev(context, "المحاولة البديلة", user, platform, url, str(e))
+        markup = _report_button(report_id, lang)
         try:
-            await status.edit_text(text)
+            await status.edit_text(text, reply_markup=markup)
             fail_msg = status
         except Exception:
-            fail_msg = await context.bot.send_message(chat_id, text)
+            fail_msg = await context.bot.send_message(chat_id, text, reply_markup=markup)
         seconds = _get_limit_value("fallback_failure_autodelete_sec")
         if db.get_setting("fallback_failure_autodelete_enabled", False):
             await _schedule_auto_delete_seconds(context, chat_id, fail_msg.message_id, seconds)
@@ -1720,8 +1841,15 @@ async def _send_post_info(context, chat_id: int, user_id: int, meta: dict, count
         )
     except Exception as e:
         logger.exception("failed to send post info caption")
-        text = db.get_message("post_info_error", lang, error=str(e))
-        sent = await context.bot.send_message(chat_id, text, reply_markup=reply_markup)
+        text = db.get_message("post_info_error", lang)
+        report_id = await _report_error_to_dev(context, "معلومات المنشور", user_id, meta.get("webpage_url", ""), meta.get("webpage_url", ""), str(e))
+        combined_markup = reply_markup
+        report_kb = _report_button(report_id, lang)
+        if reply_markup:
+            combined_markup = InlineKeyboardMarkup(list(reply_markup.inline_keyboard) + list(report_kb.inline_keyboard))
+        else:
+            combined_markup = report_kb
+        sent = await context.bot.send_message(chat_id, text, reply_markup=combined_markup)
         await _schedule_auto_delete(context, chat_id, sent.message_id, "post_info_error")
 
 
@@ -1827,7 +1955,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         if not files:
             no_files_msg = db.get_message("no_files", lang)
             await _send_error_with_retry(
-                context, chat_id, msg, no_files_msg, url, platform, fail_count + 1, lang
+                context, chat_id, msg, no_files_msg, url, platform, fail_count + 1, lang, update.effective_user
             )
             return
 
@@ -1863,7 +1991,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
-        await _send_error_with_retry(context, chat_id, msg, str(e), url, platform, fail_count + 1, lang)
+        await _send_error_with_retry(context, chat_id, msg, str(e), url, platform, fail_count + 1, lang, update.effective_user)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -1929,7 +2057,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
-        await _send_error_with_retry(context, chat_id, query.message, str(e), url, platform, lang=lang)
+        await _send_error_with_retry(context, chat_id, query.message, str(e), url, platform, lang=lang, user=query.from_user)
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -1982,7 +2110,8 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
             await _send_file(update, context, path, chat_id=chat_id, display_name=display_name)
     except Exception as e:
         logger.exception("audio download failed")
-        await status.edit_text(db.get_message("download_error", lang, error=str(e)))
+        report_id = await _report_error_to_dev(context, "تحميل صوت (MP3)", update.effective_user, platform, url, str(e))
+        await status.edit_text(db.get_message("download_error", lang), reply_markup=_report_button(report_id, lang))
     finally:
         downloader.cleanup(files)
 
@@ -2012,6 +2141,8 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(handle_audio_request, pattern=r"^aud:"))
     app.add_handler(CallbackQueryHandler(handle_pref_toggle, pattern=r"^pref:"))
     app.add_handler(CallbackQueryHandler(handle_language_choice, pattern=r"^setlang:"))
+    app.add_handler(CallbackQueryHandler(handle_report_button, pattern=r"^report:"))
+    app.add_handler(CallbackQueryHandler(handle_report_seen, pattern=r"^reportseen:"))
     app.add_handler(CallbackQueryHandler(payments.handle_buy_callback, pattern=r"^buy:"))
     app.add_handler(PreCheckoutQueryHandler(payments.handle_pre_checkout))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, payments.handle_successful_payment))
