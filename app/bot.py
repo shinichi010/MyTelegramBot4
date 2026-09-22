@@ -382,6 +382,40 @@ PENDING_ERROR_REPORTS: dict[str, dict] = {}
 AWAITING_PROBLEM_REPORT: dict[int, str] = {}
 
 
+_MD_SPECIAL = ("_", "*", "`", "[")
+
+
+def _md_escape(text) -> str:
+    """يحيّد رموز Markdown (النمط القديم legacy) داخل نص متغير قبل حقنه بقالب رسالة،
+    حتى رمز غريب بنص المستخدم او رسالة خطأ من مكتبة خارجية ما يكسر التنسيق ويلغي الإرسال كامل."""
+    text = str(text)
+    for ch in _MD_SPECIAL:
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
+async def _send_dev_report(context, kind: str, text: str) -> bool:
+    """يرسل تقرير للمطور بـ Markdown، ولو انكسر التنسيق (نص لسه فيه رمز ما انحيّد، او خطأ ثاني)
+    يعيد الإرسال كنص عادي بدل ما يضيع التقرير بالكامل، ويرجع True/False حسب النجاح."""
+    from telegram.error import BadRequest
+    target = payments.target_for(kind)
+    if not target:
+        return False
+    try:
+        await context.bot.send_message(target, text, parse_mode="Markdown")
+        return True
+    except BadRequest:
+        try:
+            await context.bot.send_message(target, text.replace("*", "").replace("`", "").replace("_", ""))
+            return True
+        except Exception:
+            logger.exception("failed to send %s report even as plain text", kind)
+            return False
+    except Exception:
+        logger.exception("failed to send %s report", kind)
+        return False
+
+
 async def _report_error_to_dev(context, kind: str, user_id, platform: str, url: str, error: str, username: str = "") -> str:
     """يسجل الخطأ تلقائياً لقناة/خاص المطور (نوع 'errors')، ويرجع report_id لبناء زر الإبلاغ للمستخدم.
     user_id يقبل رقم آيدي مباشر او كائن User (نستخرج منه .id/.username تلقائياً)."""
@@ -400,18 +434,16 @@ async def _report_error_to_dev(context, kind: str, user_id, platform: str, url: 
     for k in [k for k, v in PENDING_ERROR_REPORTS.items() if v["ts"] < cutoff]:
         PENDING_ERROR_REPORTS.pop(k, None)
 
-    try:
-        await payments.notify(
-            context,
-            db.get_message(
-                "dev_error_report", "ar", kind=kind,
-                user_id=user_id if user_id is not None else "—", username=username,
-                platform=platform or "—", url=url or "—", error=str(error)[:600],
-            ),
-            markdown=True, kind="errors",
-        )
-    except Exception:
-        logger.exception("failed to send dev error report")
+    text = db.get_message(
+        "dev_error_report", "ar",
+        kind=_md_escape(kind),
+        user_id=user_id if user_id is not None else "—",
+        username=_md_escape(username),
+        platform=_md_escape(platform or "—"),
+        url=_md_escape(url or "—"),
+        error=_md_escape(str(error)[:600]),
+    )
+    await _send_dev_report(context, "errors", text)
     return report_id
 
 
@@ -448,18 +480,27 @@ async def _handle_problem_report_text(update: Update, context: ContextTypes.DEFA
     ctx_data = PENDING_ERROR_REPORTS.get(report_id, {})
     text = db.get_message(
         "user_report", "ar",
-        user_id=user.id, username=f"@{user.username}" if user.username else "—",
-        platform=ctx_data.get("platform") or "—", url=ctx_data.get("url") or "—",
-        error=str(ctx_data.get("error") or "—")[:400],
-        message=update.message.text or "",
+        user_id=user.id,
+        username=_md_escape(f"@{user.username}") if user.username else "—",
+        platform=_md_escape(ctx_data.get("platform") or "—"),
+        url=_md_escape(ctx_data.get("url") or "—"),
+        error=_md_escape(str(ctx_data.get("error") or "—")[:400]),
+        message=_md_escape(update.message.text or ""),
     )
     markup = InlineKeyboardMarkup([[InlineKeyboardButton(
         db.get_message("btn_seen", "ar"), callback_data="reportseen:1"
     )]])
     target = payments.target_for("errors")
     if target:
+        from telegram.error import BadRequest
         try:
             await context.bot.send_message(target, text, parse_mode="Markdown", reply_markup=markup)
+        except BadRequest:
+            try:
+                plain = text.replace("*", "").replace("`", "").replace("_", "")
+                await context.bot.send_message(target, plain, reply_markup=markup)
+            except Exception:
+                logger.exception("failed to send user report even as plain text")
         except Exception:
             logger.exception("failed to send user report")
     await update.message.reply_text(db.get_message("report_sent", lang))
