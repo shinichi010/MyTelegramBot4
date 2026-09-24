@@ -153,6 +153,52 @@ async def list_x_qualities(url: str):
     return await list_qualities(url, "x")
 
 
+async def get_direct_url(url: str, platform: str, height: int = 0) -> str | None:
+    """يستخرج الرابط المباشر للفيديو (بدون تحميله على سيرفرنا) لأعلى جودة متوفرة عند الدقة
+    المطلوبة. يفضّل صيغة فيها الصوت والفيديو مدموجين بملف واحد أصلاً (شائع بفيديوهات X القصيرة)
+    حتى يقدر المستخدم يفتح الرابط مباشرة بمتصفحه بدون ما يحتاج دمج. يرجع None لو ما لقى صيغة مناسبة
+    (نادر، ونتعامل معه بالكود اللي يستدعي هذي الدالة بالرجوع للتحميل العادي)."""
+
+    def _extract():
+        opts = _base_opts()
+        opts.update(_platform_opts(platform))
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=False)
+
+    info = await asyncio.to_thread(_extract)
+    entries = _entries_of(info)
+    entry = entries[0]
+
+    effective_height = height if (height and height > 0) else config.MAX_QUALITY_HEIGHT
+    formats = entry.get("formats") or []
+
+    # نفضّل صيغة عندها فيديو وصوت مدموجين بملف واحد (يفتح مباشرة بالمتصفح بدون تعقيد)
+    combined = [
+        f for f in formats
+        if f.get("height") and f["height"] <= effective_height
+        and f.get("vcodec") not in (None, "none")
+        and f.get("acodec") not in (None, "none")
+        and f.get("url")
+    ]
+    if combined:
+        best = max(combined, key=lambda f: f["height"])
+        return best["url"]
+
+    # ما لقينا صيغة مدموجة: نرجع رابط الفيديو فقط (بدون صوت) كخيار أخير، أفضل من ما نرجع شي
+    video_only = [
+        f for f in formats
+        if f.get("height") and f["height"] <= effective_height
+        and f.get("vcodec") not in (None, "none")
+        and f.get("url")
+    ]
+    if video_only:
+        best = max(video_only, key=lambda f: f["height"])
+        return best["url"]
+
+    # آخر خيار: الرابط المباشر العام لو yt-dlp رجّعه بمستوى الـ entry نفسه
+    return entry.get("url")
+
+
 async def download_video(url: str, platform: str, height: int = 0) -> tuple[list[str], dict]:
     """يحمل كل فيديوهات/صور المنشور (وحدة او اكثر) بأقرب دقة ممكنة للدقة المختارة
     (height=0 يعني أفضل جودة متوفرة تلقائياً - مستخدم لكل المنصات غير X)."""
