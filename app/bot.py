@@ -18,6 +18,10 @@ logger = logging.getLogger("bot")
 # تخزين مؤقت بالذاكرة: id قصير -> الرابط (لأن callback_data محدود بـ 64 بايت)
 PENDING: dict[str, str] = {}
 
+# نفس req_id مالت PENDING -> {height: expected_size_bytes} (منصة X فقط، مستخرجة أصلاً
+# لحظة عرض قائمة الجودات). تستخدم لمعرفة الحجم المتوقع قبل التحميل بدون طلب yt-dlp إضافي.
+PENDING_QUALITY_SIZES: dict[str, dict] = {}
+
 # ==================== نظام الطابور للتحميلات الثقيلة ====================
 # لما يصير تحميل "ثقيل" (اكبر من HEAVY_FILE_THRESHOLD_MB)، أي طلب جديد
 # ينتظر دوره بدل ما يشتغل بالتوازي ويزنق موارد السيرفر المحدودة.
@@ -97,6 +101,9 @@ EDITABLE_MESSAGES = {
     "wechat_disabled": "ويشات غير مفعّل",
     "low_balance_one": "تنبيه: باقي تحميل واحد",
     "low_balance_zero": "تنبيه: خلص الرصيد",
+    "size_limit_active": "رسالة لمت حجم الملفات",
+    "direct_link_prompt": "رسالة عرض الرابط المباشر (X)",
+    "btn_direct_download": "نص زر تحميل من المتصفح",
     # --- المتجر والدفع ---
     "shop_title": "المتجر: العنوان",
     "shop_pick_platform": "المتجر: اختيار المنصة",
@@ -180,6 +187,10 @@ LIMIT_LABELS = {
     "rednote_fallback_weekly_limit": "حد المحاولة البديلة الأسبوعي لكل مستخدم (RedNote)",
     "wechat_fallback_weekly_limit": "حد المحاولة البديلة الأسبوعي لكل مستخدم (ويشات)",
     "low_tikhub_balance_usd": "حد تنبيه رصيد TikHub (دولار)",
+    "size_limit_trigger_mb": "عتبة تفعيل لمت الحجم (ميكا)",
+    "size_limit_duration_hours": "مدة لمت الحجم (ساعات)",
+    "size_limit_small_mb": "أقصى حجم مسموح أثناء اللمت (ميكا)",
+    "direct_link_threshold_mb": "حد تفعيل الرابط المباشر لمنصة X (ميكا)",
 }
 LIMIT_UNITS = {
     "max_file_size_mb": "ميكا",
@@ -194,6 +205,10 @@ LIMIT_UNITS = {
     "rednote_fallback_weekly_limit": "محاولة/أسبوع",
     "wechat_fallback_weekly_limit": "محاولة/أسبوع",
     "low_tikhub_balance_usd": "دولار",
+    "size_limit_trigger_mb": "ميكا",
+    "size_limit_duration_hours": "ساعة",
+    "size_limit_small_mb": "ميكا",
+    "direct_link_threshold_mb": "ميكا",
 }
 
 STICKER_LABELS = {
@@ -276,6 +291,10 @@ def _get_limit_value(key: str) -> int:
         "rednote_fallback_weekly_limit": 5,
         "wechat_fallback_weekly_limit": 1,
         "low_tikhub_balance_usd": 2,
+        "size_limit_trigger_mb": 70,
+        "size_limit_duration_hours": 6,
+        "size_limit_small_mb": 30,
+        "direct_link_threshold_mb": 250,
     }
     return int(db.get_setting(key, defaults.get(key, 0)))
 
@@ -1067,10 +1086,101 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💵 {LIMIT_LABELS['low_tikhub_balance_usd']}: {_get_limit_value('low_tikhub_balance_usd')}$",
                 callback_data="adm:limit_edit:low_tikhub_balance_usd",
             )],
+            [InlineKeyboardButton("⏱️ لمت حجم الملفات (توفير البندويث)", callback_data="adm:size_limit_menu")],
+            [InlineKeyboardButton("🔗 الرابط المباشر (X)", callback_data="adm:direct_link_menu")],
             [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")],
         ]
         await query.edit_message_text(
             "اضغط على الحد اللي تريد تغيره 👇", reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    elif data == "adm:direct_link_menu" or data == "adm:direct_link_toggle":
+        if data == "adm:direct_link_toggle":
+            db.set_setting("direct_link_enabled", not db.get_setting("direct_link_enabled", True))
+            await query.answer("تم التغيير ✅")
+        enabled = db.get_setting("direct_link_enabled", True)
+        buttons = [
+            [InlineKeyboardButton(
+                f"الرابط المباشر: {'🟢 مفعّل' if enabled else '🔴 موقف'}", callback_data="adm:direct_link_toggle",
+            )],
+            [InlineKeyboardButton(
+                f"📦 {LIMIT_LABELS['direct_link_threshold_mb']}: {_get_limit_value('direct_link_threshold_mb')} ميكا",
+                callback_data="adm:limit_edit:direct_link_threshold_mb",
+            )],
+            [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
+        ]
+        await query.edit_message_text(
+            "🔗 *الرابط المباشر لمنصة X*\n\n"
+            "لما حجم فيديو X المتوقع يتجاوز الحد المحدد، بدل ما نحمله على سيرفرنا ونرفعه "
+            "لتليگرام، نعرض للمستخدم زر يفتح رابط الفيديو المباشر بمتصفحه - يوفر بندويث "
+            "سيرفرنا بالكامل تقريباً لهذي الحالة.\n\n"
+            "غيّر أي قيمة 👇",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:size_limit_menu":
+        enabled = db.get_setting("size_limit_enabled", True)
+        bypassed = db.list_size_limit_bypass()
+        buttons = [
+            [InlineKeyboardButton(
+                f"لمت حجم الملفات: {'🟢 مفعّل' if enabled else '🔴 موقف'}", callback_data="adm:size_limit_toggle",
+            )],
+            [InlineKeyboardButton(
+                f"📦 {LIMIT_LABELS['size_limit_trigger_mb']}: {_get_limit_value('size_limit_trigger_mb')} ميكا",
+                callback_data="adm:limit_edit:size_limit_trigger_mb",
+            )],
+            [InlineKeyboardButton(
+                f"⏳ {LIMIT_LABELS['size_limit_duration_hours']}: {_get_limit_value('size_limit_duration_hours')} ساعة",
+                callback_data="adm:limit_edit:size_limit_duration_hours",
+            )],
+            [InlineKeyboardButton(
+                f"📉 {LIMIT_LABELS['size_limit_small_mb']}: {_get_limit_value('size_limit_small_mb')} ميكا",
+                callback_data="adm:limit_edit:size_limit_small_mb",
+            )],
+            [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
+        ]
+        await query.edit_message_text(
+            "⏱️ *لمت حجم الملفات*\n\n"
+            "أي ملف يوصل حجمه لعتبة التفعيل يبدأ فترة لمت للمستخدم، خلالها ما يكدر يحمل "
+            "إلا ملفات أصغر من الحد المسموح. المشتركين اللي عندهم رصيد مدفوع (أي منصة) "
+            "والأدمن يتخطون اللمت تلقائياً. لإعفاء مستخدم يدوياً: `/sizebypass <آيدي>` "
+            f"(المعفيين حالياً: {len(bypassed)}).\n\n"
+            "غيّر أي قيمة 👇",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:size_limit_toggle":
+        current = db.get_setting("size_limit_enabled", True)
+        db.set_setting("size_limit_enabled", not current)
+        await query.answer("تم التغيير ✅")
+        enabled = not current
+        bypassed = db.list_size_limit_bypass()
+        buttons = [
+            [InlineKeyboardButton(
+                f"لمت حجم الملفات: {'🟢 مفعّل' if enabled else '🔴 موقف'}", callback_data="adm:size_limit_toggle",
+            )],
+            [InlineKeyboardButton(
+                f"📦 {LIMIT_LABELS['size_limit_trigger_mb']}: {_get_limit_value('size_limit_trigger_mb')} ميكا",
+                callback_data="adm:limit_edit:size_limit_trigger_mb",
+            )],
+            [InlineKeyboardButton(
+                f"⏳ {LIMIT_LABELS['size_limit_duration_hours']}: {_get_limit_value('size_limit_duration_hours')} ساعة",
+                callback_data="adm:limit_edit:size_limit_duration_hours",
+            )],
+            [InlineKeyboardButton(
+                f"📉 {LIMIT_LABELS['size_limit_small_mb']}: {_get_limit_value('size_limit_small_mb')} ميكا",
+                callback_data="adm:limit_edit:size_limit_small_mb",
+            )],
+            [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
+        ]
+        await query.edit_message_text(
+            "⏱️ *لمت حجم الملفات*\n\n"
+            "أي ملف يوصل حجمه لعتبة التفعيل يبدأ فترة لمت للمستخدم، خلالها ما يكدر يحمل "
+            "إلا ملفات أصغر من الحد المسموح. المشتركين اللي عندهم رصيد مدفوع (أي منصة) "
+            "والأدمن يتخطون اللمت تلقائياً. لإعفاء مستخدم يدوياً: `/sizebypass <آيدي>` "
+            f"(المعفيين حالياً: {len(bypassed)}).\n\n"
+            "غيّر أي قيمة 👇",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
         )
 
     elif data == "adm:fallback_menu":
@@ -1261,6 +1371,44 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     db.unban_user(target_id)
     await update.message.reply_text(f"تم إلغاء حظر المستخدم {target_id} ✅")
+
+
+async def sizebypass_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أدمن: يعفي مستخدم يدوياً من لمت حجم الملفات (منفصل عن إعفاء المشتركين المدفوعين التلقائي)."""
+    if not _is_admin(update.effective_user.id):
+        return
+    _clear_awaiting_states(update.effective_user.id)
+    if not context.args:
+        bypassed = db.list_size_limit_bypass()
+        text = ("لا يوجد مستخدمين معفيين حالياً." if not bypassed
+                else "المستخدمين المعفيين من لمت الحجم:\n" + "\n".join(f"• `{u}`" for u in bypassed))
+        text += "\n\nلإضافة: `/sizebypass <آيدي المستخدم>`\nللإزالة: `/unsizebypass <آيدي المستخدم>`"
+        await update.message.reply_text(text, parse_mode="Markdown")
+        return
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("آيدي غير صالح ❌")
+        return
+    db.add_size_limit_bypass(target_id)
+    await update.message.reply_text(f"تم إعفاء المستخدم {target_id} من لمت حجم الملفات ✅")
+
+
+async def unsizebypass_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return
+    _clear_awaiting_states(update.effective_user.id)
+    if not context.args:
+        await update.message.reply_text("استخدم: /unsizebypass <آيدي المستخدم>")
+        return
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("آيدي غير صالح ❌")
+        return
+    db.remove_size_limit_bypass(target_id)
+    await update.message.reply_text(f"تم إلغاء إعفاء المستخدم {target_id} ✅")
+
 
 
 async def handle_admin_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1680,6 +1828,9 @@ async def _run_fallback_download(update, context, user, chat_id: int, url: str, 
         if not _check_size_ok(files):
             await status.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
+        if not _size_limit_allows(user.id, _total_size(files)):
+            await status.edit_text(_size_limit_message(lang))
+            return
 
         await status.delete()
 
@@ -1696,6 +1847,7 @@ async def _run_fallback_download(update, context, user, chat_id: int, url: str, 
         if not _is_admin(user.id):
             wallet.consume(user.id, platform, url)
             db.log_link(user.id, user.username or "", platform, url)
+        _maybe_trigger_size_limit(user.id, _total_size(files))
         _record_download_success(platform)
 
         try:
@@ -1894,6 +2046,69 @@ async def _send_post_info(context, chat_id: int, user_id: int, meta: dict, count
         await _schedule_auto_delete(context, chat_id, sent.message_id, "post_info_error")
 
 
+# ---------- لمت حجم الملفات (تقليل البندويث بعد تحميل ملف كبير) ----------
+
+def _size_limit_settings():
+    return {
+        "trigger_mb": _get_limit_value("size_limit_trigger_mb"),
+        "duration_hours": _get_limit_value("size_limit_duration_hours"),
+        "small_mb": _get_limit_value("size_limit_small_mb"),
+    }
+
+
+def _size_limit_active(user_id: int) -> bool:
+    """هل المستخدم بفترة لمت فعالة هسه؟ (حمّل ملف كبير خلال آخر X ساعة ولم تنتهِ المدة)."""
+    if not db.get_setting("size_limit_enabled", True):
+        return False
+    if _is_admin(user_id) or db.is_size_limit_bypassed(user_id):
+        return False
+    # المشتركين المدفوعين (عندهم رصيد بأي منصة) يتخطون اللمت تلقائياً
+    if any(wallet.get_balance(user_id, p) > 0 for p in wallet.PAID_PLATFORMS):
+        return False
+    hit_at = db.get_size_limit_hit(user_id)
+    if hit_at is None:
+        return False
+    duration = _size_limit_settings()["duration_hours"]
+    from datetime import datetime, timezone, timedelta
+    if hit_at.tzinfo is None:
+        hit_at = hit_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - hit_at >= timedelta(hours=duration):
+        db.clear_size_limit_hit(user_id)
+        return False
+    return True
+
+
+def _size_limit_allows(user_id: int, size_bytes: int) -> bool:
+    """هل حجم هذا الملف مسموح بيه للمستخدم بوضعه الحالي (عادي، او تحت لمت)؟"""
+    if not _size_limit_active(user_id):
+        return True
+    small_bytes = _size_limit_settings()["small_mb"] * 1024 * 1024
+    return size_bytes <= small_bytes
+
+
+def _maybe_trigger_size_limit(user_id: int, size_bytes: int):
+    """يسجل بداية فترة اللمت لو الملف اللي انحمّل توه وصل عتبة التفعيل.
+    يُستدعى بعد نجاح التحميل الفعلي (مو قبله)، ومستثنى منها الأدمن والمعفيين والمشتركين المدفوعين."""
+    if not db.get_setting("size_limit_enabled", True):
+        return
+    if _is_admin(user_id) or db.is_size_limit_bypassed(user_id):
+        return
+    if any(wallet.get_balance(user_id, p) > 0 for p in wallet.PAID_PLATFORMS):
+        return
+    trigger_bytes = _size_limit_settings()["trigger_mb"] * 1024 * 1024
+    if size_bytes >= trigger_bytes:
+        db.set_size_limit_hit(user_id)
+
+
+def _size_limit_message(lang: str) -> str:
+    s = _size_limit_settings()
+    return db.get_message(
+        "size_limit_active", lang,
+        big_mb=s["trigger_mb"], hours=s["duration_hours"], small_mb=s["small_mb"],
+    )
+
+
+
 def _check_size_ok(files: list[str]) -> bool:
     import os
     total = sum(os.path.getsize(f) for f in files if os.path.exists(f))
@@ -1951,6 +2166,9 @@ async def _handle_x(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
 
     req_id = uuid.uuid4().hex[:10]
     PENDING[req_id] = (url, platform)
+    # نحفظ الحجم المتوقع لكل دقة (استخرجناه أصلاً من yt-dlp هنا) حتى ما نحتاج نطلبه مرة ثانية
+    # لما المستخدم يضغط الجودة - يفيد بالتحقق قبل التحميل لعرض الرابط المباشر (منصة X).
+    PENDING_QUALITY_SIZES[req_id] = dict(quality_options)
 
     buttons = []
     best_label = db.get_message("best_quality", lang)
@@ -2003,6 +2221,9 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         if not _check_size_ok(files):
             await msg.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
+        if not _size_limit_allows(update.effective_user.id, _total_size(files)):
+            await msg.edit_text(_size_limit_message(lang))
+            return
 
         if _total_size(files) >= _heavy_threshold_bytes():
             await _acquire_heavy_slot(update, context, chat_id)
@@ -2024,6 +2245,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
             db.get_message("btn_audio", lang), callback_data=f"aud:{platform}:{req_id}"
         )]])
+        _maybe_trigger_size_limit(update.effective_user.id, _total_size(files))
         _record_download_success(platform)
         try:
             await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files), reply_markup=audio_btn)
@@ -2037,6 +2259,17 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         downloader.cleanup(files)
         if took_heavy_slot:
             _release_heavy_slot()
+
+
+async def _offer_direct_link(query, lang: str, direct_url: str):
+    """يعرض للمستخدم زر يفتح رابط الفيديو المباشر بمتصفحه، بدل تحميله على سيرفرنا ورفعه
+    لتليگرام. يستخدم حالياً لمنصة X فقط لما الحجم يتجاوز حد تليگرام للرفع."""
+    text = db.get_message("direct_link_prompt", lang, max_size=_max_file_size_mb())
+    button = InlineKeyboardMarkup([[InlineKeyboardButton(
+        db.get_message("btn_direct_download", lang), url=direct_url
+    )]])
+    await query.edit_message_text(text, reply_markup=button)
+
 
 
 async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2053,6 +2286,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     pending = PENDING.pop(req_id, None)
+    quality_sizes = PENDING_QUALITY_SIZES.pop(req_id, {})
     if not pending:
         await query.edit_message_text(db.get_message("expired_request", lang))
         return
@@ -2065,13 +2299,36 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     files = []
     took_heavy_slot = False
     try:
+        # X فقط: نتحقق من حجم الفيديو المتوقع *قبل* التحميل (yt-dlp عادة تعرف الحجم من
+        # قائمة الجودات أصلاً). لو الحجم معروف ومتوقع أكبر من حد تليگرام، نتخطى التحميل
+        # والرفع بالكامل ونعرض رابط مباشر بدل هذا - يوفر بندويث سيرفرنا من الجهتين.
+        if not is_audio and platform == "x" and db.get_setting("direct_link_enabled", True):
+            expected_size = quality_sizes.get(height)
+            threshold_bytes = _get_limit_value("direct_link_threshold_mb") * 1024 * 1024
+            if expected_size and expected_size > threshold_bytes:
+                direct_url = await downloader.get_direct_url(url, platform, height)
+                if direct_url:
+                    await _offer_direct_link(query, lang, direct_url)
+                    return
+                # ما لقينا رابط مباشر (نادر) - نكمل بالتحميل العادي كخطة احتياط
+
         if is_audio:
             files, meta = await downloader.download_audio(url, platform)
         else:
             files, meta = await downloader.download_video(url, platform, height)
 
         if not _check_size_ok(files):
+            # اكتشفنا الحجم الحقيقي بعد التحميل (yt-dlp ما وفرت حجم مسبق) - لو المنصة X
+            # ولسه نقدر نستخرج رابط مباشر من نفس التحميل، نعرضه بدل رسالة "الملف كبير" العادية
+            if platform == "x" and not is_audio and db.get_setting("direct_link_enabled", True):
+                direct_url = await downloader.get_direct_url(url, platform, height)
+                if direct_url:
+                    await _offer_direct_link(query, lang, direct_url)
+                    return
             await query.edit_message_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
+            return
+        if not _size_limit_allows(query.from_user.id, _total_size(files)):
+            await query.edit_message_text(_size_limit_message(lang))
             return
 
         if _total_size(files) >= _heavy_threshold_bytes():
@@ -2089,6 +2346,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
             raise
         await _resolve_upload_sticker_success(sticker_msg)
+        _maybe_trigger_size_limit(query.from_user.id, _total_size(files))
         _record_download_success(platform)
 
         try:
@@ -2145,10 +2403,14 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
         if not files or not _check_size_ok(files):
             await status.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
+        if not _size_limit_allows(query.from_user.id, _total_size(files)):
+            await status.edit_text(_size_limit_message(lang))
+            return
         await status.delete()
         display_name = meta.get("audio_display_name")
         for path in files:
             await _send_file(update, context, path, chat_id=chat_id, display_name=display_name)
+        _maybe_trigger_size_limit(query.from_user.id, _total_size(files))
     except Exception as e:
         logger.exception("audio download failed")
         report_id = await _report_error_to_dev(context, "تحميل صوت (MP3)", update.effective_user, platform, url, str(e))
@@ -2173,6 +2435,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("deeplink", deeplink_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("sizebypass", sizebypass_command))
+    app.add_handler(CommandHandler("unsizebypass", unsizebypass_command))
     app.add_handler(CommandHandler("buy", buy_command))
     app.add_handler(CommandHandler("paysupport", paysupport_command))
     app.add_handler(CommandHandler("ban", ban_command))
