@@ -2263,8 +2263,9 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def _offer_direct_link(query, lang: str, direct_url: str):
     """يعرض للمستخدم زر يفتح رابط الفيديو المباشر بمتصفحه، بدل تحميله على سيرفرنا ورفعه
-    لتليگرام. يستخدم حالياً لمنصة X فقط لما الحجم يتجاوز حد تليگرام للرفع."""
-    text = db.get_message("direct_link_prompt", lang, max_size=_max_file_size_mb())
+    لتليگرام. يستخدم حالياً لمنصة X فقط لما الحجم يتجاوز حد الرابط المباشر (وليس بالضرورة
+    حد تليگرام العام - الاثنين مستقلان وقد يختلف الرقم بينهما)."""
+    text = db.get_message("direct_link_prompt", lang, max_size=_get_limit_value("direct_link_threshold_mb"))
     button = InlineKeyboardMarkup([[InlineKeyboardButton(
         db.get_message("btn_direct_download", lang), url=direct_url
     )]])
@@ -2317,14 +2318,21 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             files, meta = await downloader.download_video(url, platform, height)
 
-        if not _check_size_ok(files):
-            # اكتشفنا الحجم الحقيقي بعد التحميل (yt-dlp ما وفرت حجم مسبق) - لو المنصة X
-            # ولسه نقدر نستخرج رابط مباشر من نفس التحميل، نعرضه بدل رسالة "الملف كبير" العادية
-            if platform == "x" and not is_audio and db.get_setting("direct_link_enabled", True):
+        # X فقط: نتحقق من الحجم الفعلي بعد التحميل مقابل حد الرابط المباشر تحديداً
+        # (مو حد تليگرام العام) - يغطي الحالة اللي yt-dlp ما وفرت حجم دقيق مسبقاً،
+        # وهذا شائع جداً بفيديوهات X. هذا الفحص لازم يصير *قبل* _check_size_ok،
+        # لأن الملف ممكن يكون أصغر من حد تليگرام (مقبول للرفع) لكن أكبر من حد
+        # الرابط المباشر اللي حدده الأدمن - وبهالحالة لازم نعرض الرابط المباشر برضو.
+        if not is_audio and platform == "x" and db.get_setting("direct_link_enabled", True):
+            threshold_bytes = _get_limit_value("direct_link_threshold_mb") * 1024 * 1024
+            if _total_size(files) > threshold_bytes:
                 direct_url = await downloader.get_direct_url(url, platform, height)
                 if direct_url:
                     await _offer_direct_link(query, lang, direct_url)
                     return
+                # ما لقينا رابط مباشر (نادر) - نكمل بالفحص العادي تحت كخطة احتياط
+
+        if not _check_size_ok(files):
             await query.edit_message_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
             return
         if not _size_limit_allows(query.from_user.id, _total_size(files)):
