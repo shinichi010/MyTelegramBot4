@@ -64,7 +64,21 @@ def _wechat_ping_loop():
         time.sleep(max(int(interval_min), 1) * 60)
 
 
+def _size_limit_cleanup_loop():
+    """ينظف سجلات لمت الحجم المنتهية بالخلفية، حتى المجموعة تبقى صغيرة دائماً
+    (سجل واحد أقل من 200 بايت، وما نحتاج نحتفظ بأي شي أقدم من مدة اللمت + هامش)."""
+    time.sleep(60)
+    while True:
+        try:
+            duration = int(db.get_setting("size_limit_duration_hours", 6))
+            db.cleanup_expired_size_limits(older_than_hours=duration + 2)  # هامش أمان ساعتين
+        except Exception as e:
+            logger.warning(f"size-limit cleanup failed: {e}")
+        time.sleep(3600)  # مرة كل ساعة يكفي تماماً، السجلات صغيرة جداً أصلاً
+
+
 def start_keepalive():
     threading.Thread(target=_run_flask, daemon=True).start()
     threading.Thread(target=_main_ping_loop, daemon=True).start()
     threading.Thread(target=_wechat_ping_loop, daemon=True).start()
+    threading.Thread(target=_size_limit_cleanup_loop, daemon=True).start()
