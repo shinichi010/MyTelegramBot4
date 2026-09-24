@@ -10,7 +10,7 @@
 ملاحظة: لا تُخزَّن أي فيديوهات أو صور هنا إطلاقاً - القاعدة نصوص فقط.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from pymongo import MongoClient, ASCENDING
 
@@ -446,6 +446,24 @@ DEFAULT_MESSAGES = {
             "💬 *User's message:*\n{message}"
         ),
     },
+    "size_limit_active": {
+        "ar": (
+            "⏳ وصلت لحد تحميل {big_mb} ميكا، لإجراء تحميل كبير مرة أخرى حاول بعد {hours} ساعة.\n"
+            "لكن يمكنك الاستمتاع بتحميل مقاطع صغيرة (أقل من {small_mb} ميكا) لحين انتهاء فترة اللمت."
+        ),
+        "en": (
+            "⏳ You've reached the {big_mb} MB download limit — try a large download again in {hours} hours.\n"
+            "But you can still enjoy downloading smaller clips (under {small_mb} MB) until the limit period ends."
+        ),
+    },
+    "direct_link_prompt": {
+        "ar": "📦 الملف أكبر من {max_size} ميكا، الحد المسموح رفعه بتليگرام.\nتقدر تحمله مباشرة من متصفحك بالضغط على الزر تحت 👇",
+        "en": "📦 The file is larger than {max_size} MB, the limit Telegram allows uploading.\nYou can download it directly from your browser by tapping the button below 👇",
+    },
+    "btn_direct_download": {
+        "ar": "📥 حمل من المتصفح",
+        "en": "📥 Download from browser",
+    },
 }
 
 
@@ -765,6 +783,70 @@ def is_banned(user_id: int) -> bool:
     if not is_connected():
         return False
     return _db.banned_users.find_one({"user_id": user_id}) is not None
+
+
+# ---------- لمت حجم الملفات (تقليل البندويث بعد تحميل ملف كبير) ----------
+
+def set_size_limit_hit(user_id: int, hit_at=None):
+    """يسجل إن المستخدم حمّل ملف كبير الآن - يبدأ عده فترة اللمت من هذي اللحظة."""
+    if not is_connected():
+        return
+    _db.size_limit_hits.update_one(
+        {"user_id": user_id},
+        {"$set": {"user_id": user_id, "hit_at": hit_at or datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+
+
+def get_size_limit_hit(user_id: int):
+    """يرجع وقت آخر تحميل كبير سببه دخول اللمت، او None لو ماكو لمت فعال."""
+    if not is_connected():
+        return None
+    doc = _db.size_limit_hits.find_one({"user_id": user_id})
+    return doc["hit_at"] if doc else None
+
+
+def clear_size_limit_hit(user_id: int):
+    if not is_connected():
+        return
+    _db.size_limit_hits.delete_one({"user_id": user_id})
+
+
+def cleanup_expired_size_limits(older_than_hours: int):
+    """يحذف سجلات اللمت المنتهية (أقدم من مدة اللمت + هامش) حتى المجموعة تبقى صغيرة دائماً."""
+    if not is_connected():
+        return
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
+    _db.size_limit_hits.delete_many({"hit_at": {"$lt": cutoff}})
+
+
+def add_size_limit_bypass(user_id: int):
+    """قائمة إعفاء يدوية من الأدمن (منفصلة عن إعفاء المشتركين المدفوعين التلقائي)."""
+    if not is_connected():
+        return
+    _db.size_limit_bypass.update_one(
+        {"user_id": user_id},
+        {"$set": {"user_id": user_id, "added_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+
+
+def remove_size_limit_bypass(user_id: int):
+    if not is_connected():
+        return
+    _db.size_limit_bypass.delete_one({"user_id": user_id})
+
+
+def is_size_limit_bypassed(user_id: int) -> bool:
+    if not is_connected():
+        return False
+    return _db.size_limit_bypass.find_one({"user_id": user_id}) is not None
+
+
+def list_size_limit_bypass(limit: int = 50) -> list[int]:
+    if not is_connected():
+        return []
+    return [d["user_id"] for d in _db.size_limit_bypass.find().sort("added_at", -1).limit(limit)]
 
 
 # ---------- توقيف منصة ----------
