@@ -457,8 +457,16 @@ DEFAULT_MESSAGES = {
         ),
     },
     "direct_link_prompt": {
-        "ar": "📦 الملف أكبر من {max_size} ميكا، الحد المسموح رفعه بتليگرام.\nتقدر تحمله مباشرة من متصفحك بالضغط على الزر تحت 👇",
-        "en": "📦 The file is larger than {max_size} MB, the limit Telegram allows uploading.\nYou can download it directly from your browser by tapping the button below 👇",
+        "ar": (
+            "📦 الملف أكبر من {max_size} ميكا، الحد المسموح رفعه بتليگرام.\n"
+            "اضغط الزر تحت 👇 حتى يفتح الفيديو بمتصفحك، وبعدها اضغط ضغطة مطولة "
+            "على الفيديو نفسه وراح يطلعلك خيار حفظ/تحميل الفيديو لجهازك."
+        ),
+        "en": (
+            "📦 The file is larger than {max_size} MB, the limit Telegram allows uploading.\n"
+            "Tap the button below 👇 to open the video in your browser, then long-press "
+            "on the video itself and a save/download option will appear."
+        ),
     },
     "btn_direct_download": {
         "ar": "📥 حمل من المتصفح",
@@ -847,6 +855,38 @@ def list_size_limit_bypass(limit: int = 50) -> list[int]:
     if not is_connected():
         return []
     return [d["user_id"] for d in _db.size_limit_bypass.find().sort("added_at", -1).limit(limit)]
+
+
+# ---------- إعفاء يدوي من حد الرابط المباشر لـ X (منفصل عن باقي الإعفاءات عمداً) ----------
+
+def add_x_bypass(user_id: int):
+    """قائمة إعفاء يدوية خاصة بحد الرابط المباشر لمنصة X - منفصلة عن قائمة لمت حجم
+    الملفات العامة، حتى إعفاء صديق من حد X ما يعفيه تلقائياً من أنظمة أخرى."""
+    if not is_connected():
+        return
+    _db.x_link_bypass.update_one(
+        {"user_id": user_id},
+        {"$set": {"user_id": user_id, "added_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+
+
+def remove_x_bypass(user_id: int):
+    if not is_connected():
+        return
+    _db.x_link_bypass.delete_one({"user_id": user_id})
+
+
+def is_x_bypassed(user_id: int) -> bool:
+    if not is_connected():
+        return False
+    return _db.x_link_bypass.find_one({"user_id": user_id}) is not None
+
+
+def list_x_bypass(limit: int = 50) -> list[int]:
+    if not is_connected():
+        return []
+    return [d["user_id"] for d in _db.x_link_bypass.find().sort("added_at", -1).limit(limit)]
 
 
 # ---------- توقيف منصة ----------
