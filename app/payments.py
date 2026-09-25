@@ -18,8 +18,8 @@ from . import config, db, wallet
 logger = logging.getLogger("payments")
 
 PLATFORM_NAMES = {
-    "ar": {"douyin": "دويين", "rednote": "RedNote", "wechat": "ويشات"},
-    "en": {"douyin": "Douyin", "rednote": "RedNote", "wechat": "WeChat"},
+    "ar": {"douyin": "دويين", "rednote": "RedNote", "wechat": "ويشات", "x": "X"},
+    "en": {"douyin": "Douyin", "rednote": "RedNote", "wechat": "WeChat", "x": "X"},
 }
 
 # user_id -> (url, platform): رابط ينتظر المستخدم يشتري رصيد حتى يكمل تحميله تلقائياً
