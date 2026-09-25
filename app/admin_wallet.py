@@ -13,7 +13,7 @@ from . import config, db, wallet, payments, tikhub
 
 logger = logging.getLogger("admin_wallet")
 
-PLATFORM_LABELS = {"douyin": "دويين", "rednote": "RedNote", "wechat": "ويشات"}
+PLATFORM_LABELS = {"douyin": "دويين", "rednote": "RedNote", "wechat": "ويشات", "x": "X"}
 
 # admin_id -> dict(state=..., ...) حالة انتظار نص من الأدمن
 AWAITING_WALLET: dict[int, dict] = {}
@@ -310,7 +310,8 @@ async def handle_wallet_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(f"✅ انهدى {n} تحميل ({PLATFORM_LABELS[p]}) للمستخدم `{uid}`\nرصيده الآن: {bal}",
                                             parse_mode="Markdown")
             try:
-                await context.bot.send_message(uid, f"🎁 وصلتك هدية: {n} تحميل بالمحاولة البديلة ({PLATFORM_LABELS[p]})!")
+                kind_ar = "تحميل بالمحاولة البديلة" if p in ("douyin", "rednote", "wechat") else "تحميل ملفات كبيرة"
+                await context.bot.send_message(uid, f"🎁 وصلتك هدية: {n} {kind_ar} ({PLATFORM_LABELS[p]})!")
             except Exception:
                 await update.message.reply_text("(ما كدرت أبلغ المستخدم - ممكن حاظر البوت)")
         else:
