@@ -104,6 +104,7 @@ EDITABLE_MESSAGES = {
     "size_limit_active": "رسالة لمت حجم الملفات",
     "direct_link_prompt": "رسالة عرض الرابط المباشر (X)",
     "btn_direct_download": "نص زر تحميل من المتصفح",
+    "btn_buy_platform": "نص زر شراء رصيد لمنصة",
     # --- المتجر والدفع ---
     "shop_title": "المتجر: العنوان",
     "shop_pick_platform": "المتجر: اختيار المنصة",
@@ -1109,11 +1110,15 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )],
             [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
         ]
+        bypassed_x = db.list_x_bypass()
         await query.edit_message_text(
             "🔗 *الرابط المباشر لمنصة X*\n\n"
             "لما حجم فيديو X المتوقع يتجاوز الحد المحدد، بدل ما نحمله على سيرفرنا ونرفعه "
             "لتليگرام، نعرض للمستخدم زر يفتح رابط الفيديو المباشر بمتصفحه - يوفر بندويث "
             "سيرفرنا بالكامل تقريباً لهذي الحالة.\n\n"
+            "المستخدم يتخطى هذا الحد تلقائياً لو عنده رصيد X مدفوع (باقات X تُدار من "
+            "💰 الأرصدة والدفع ← 📦 الباقات والأسعار)، او يدوياً عبر `/xbypass <آيدي>` "
+            f"(المعفيين حالياً: {len(bypassed_x)}).\n\n"
             "غيّر أي قيمة 👇",
             parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
         )
@@ -1407,6 +1412,44 @@ async def unsizebypass_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("آيدي غير صالح ❌")
         return
     db.remove_size_limit_bypass(target_id)
+    await update.message.reply_text(f"تم إلغاء إعفاء المستخدم {target_id} ✅")
+
+
+async def xbypass_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أدمن: يعفي مستخدم يدوياً من حد الرابط المباشر لـ X (قائمة منفصلة عن كل الإعفاءات
+    الأخرى - مخصصة لأصدقاء/معارف المطور، منفصلة عن الرصيد المدفوع وعن لمت حجم الملفات)."""
+    if not _is_admin(update.effective_user.id):
+        return
+    _clear_awaiting_states(update.effective_user.id)
+    if not context.args:
+        bypassed = db.list_x_bypass()
+        text = ("لا يوجد مستخدمين معفيين حالياً." if not bypassed
+                else "المستخدمين المعفيين من حد الرابط المباشر لـ X:\n" + "\n".join(f"• `{u}`" for u in bypassed))
+        text += "\n\nلإضافة: `/xbypass <آيدي المستخدم>`\nللإزالة: `/unxbypass <آيدي المستخدم>`"
+        await update.message.reply_text(text, parse_mode="Markdown")
+        return
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("آيدي غير صالح ❌")
+        return
+    db.add_x_bypass(target_id)
+    await update.message.reply_text(f"تم إعفاء المستخدم {target_id} من حد الرابط المباشر لـ X ✅")
+
+
+async def unxbypass_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return
+    _clear_awaiting_states(update.effective_user.id)
+    if not context.args:
+        await update.message.reply_text("استخدم: /unxbypass <آيدي المستخدم>")
+        return
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("آيدي غير صالح ❌")
+        return
+    db.remove_x_bypass(target_id)
     await update.message.reply_text(f"تم إلغاء إعفاء المستخدم {target_id} ✅")
 
 
@@ -2261,15 +2304,28 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
             _release_heavy_slot()
 
 
+def _x_direct_link_bypass(user_id: int) -> bool:
+    """هل هذا المستخدم يتخطى حد الرابط المباشر لـ X؟ (أدمن، معفى يدوياً بقائمة /xbypass
+    المنفصلة عن باقي الإعفاءات، او عنده رصيد X مدفوع فعلي)."""
+    if _is_admin(user_id) or db.is_x_bypassed(user_id):
+        return True
+    return wallet.get_balance(user_id, "x") > 0
+
+
+
 async def _offer_direct_link(query, lang: str, direct_url: str):
     """يعرض للمستخدم زر يفتح رابط الفيديو المباشر بمتصفحه، بدل تحميله على سيرفرنا ورفعه
     لتليگرام. يستخدم حالياً لمنصة X فقط لما الحجم يتجاوز حد الرابط المباشر (وليس بالضرورة
-    حد تليگرام العام - الاثنين مستقلان وقد يختلف الرقم بينهما)."""
+    حد تليگرام العام - الاثنين مستقلان وقد يختلف الرقم بينهما). إذا الدفع مفعّل لمنصة X،
+    يضيف زر شراء تحت زر التحميل حتى المستخدم يقدر يتخطى الحد ويحمل عبر تليگرام مباشرة."""
     text = db.get_message("direct_link_prompt", lang, max_size=_get_limit_value("direct_link_threshold_mb"))
-    button = InlineKeyboardMarkup([[InlineKeyboardButton(
-        db.get_message("btn_direct_download", lang), url=direct_url
-    )]])
-    await query.edit_message_text(text, reply_markup=button)
+    buttons = [[InlineKeyboardButton(db.get_message("btn_direct_download", lang), url=direct_url)]]
+    if wallet.payments_enabled("x"):
+        buttons.append([InlineKeyboardButton(
+            db.get_message("btn_buy_platform", lang, platform=payments.pname("x", lang)),
+            callback_data="buy:plat:x",
+        )])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 
@@ -2299,11 +2355,13 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     chat_id = query.message.chat_id
     files = []
     took_heavy_slot = False
+    x_big_file = False  # يتعدل لاحقاً فقط لو المنصة X وتجاوز حد الرابط المباشر بتخطي مدفوع
     try:
         # X فقط: نتحقق من حجم الفيديو المتوقع *قبل* التحميل (yt-dlp عادة تعرف الحجم من
         # قائمة الجودات أصلاً). لو الحجم معروف ومتوقع أكبر من حد تليگرام، نتخطى التحميل
         # والرفع بالكامل ونعرض رابط مباشر بدل هذا - يوفر بندويث سيرفرنا من الجهتين.
-        if not is_audio and platform == "x" and db.get_setting("direct_link_enabled", True):
+        if (not is_audio and platform == "x" and db.get_setting("direct_link_enabled", True)
+                and not _x_direct_link_bypass(query.from_user.id)):
             expected_size = quality_sizes.get(height)
             threshold_bytes = _get_limit_value("direct_link_threshold_mb") * 1024 * 1024
             if expected_size and expected_size > threshold_bytes:
@@ -2323,7 +2381,8 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
         # وهذا شائع جداً بفيديوهات X. هذا الفحص لازم يصير *قبل* _check_size_ok،
         # لأن الملف ممكن يكون أصغر من حد تليگرام (مقبول للرفع) لكن أكبر من حد
         # الرابط المباشر اللي حدده الأدمن - وبهالحالة لازم نعرض الرابط المباشر برضو.
-        if not is_audio and platform == "x" and db.get_setting("direct_link_enabled", True):
+        if (not is_audio and platform == "x" and db.get_setting("direct_link_enabled", True)
+                and not _x_direct_link_bypass(query.from_user.id)):
             threshold_bytes = _get_limit_value("direct_link_threshold_mb") * 1024 * 1024
             if _total_size(files) > threshold_bytes:
                 direct_url = await downloader.get_direct_url(url, platform, height)
@@ -2331,6 +2390,11 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
                     await _offer_direct_link(query, lang, direct_url)
                     return
                 # ما لقينا رابط مباشر (نادر) - نكمل بالفحص العادي تحت كخطة احتياط
+        elif (not is_audio and platform == "x" and db.get_setting("direct_link_enabled", True)):
+            # المستخدم يتخطى الحد (رصيد/إعفاء/أدمن): نعلّم الملف حتى نخصم رصيد لو تجاوز
+            # الحد فعلاً ونجح الرفع (الأدمن والإعفاء اليدوي ما ينخصم منهم شي، فقط أصحاب الرصيد)
+            threshold_bytes = _get_limit_value("direct_link_threshold_mb") * 1024 * 1024
+            x_big_file = _total_size(files) > threshold_bytes
 
         if not _check_size_ok(files):
             await query.edit_message_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
@@ -2356,6 +2420,11 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await _resolve_upload_sticker_success(sticker_msg)
         _maybe_trigger_size_limit(query.from_user.id, _total_size(files))
         _record_download_success(platform)
+        # X: نخصم رصيد فقط لو الملف تجاوز الحد فعلاً واستخدم تخطي مدفوع (مو أدمن/إعفاء يدوي).
+        # الخصم بعد نجاح الرفع الفعلي مثل باقي النظام، وwallet.consume تستهلك المجاني أولاً
+        # (وX ماله حد مجاني أصلاً، فينزل مباشرة من الرصيد المدفوع لو موجود).
+        if x_big_file and not _is_admin(query.from_user.id) and not db.is_x_bypassed(query.from_user.id):
+            wallet.consume(query.from_user.id, "x", url)
 
         try:
             await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
@@ -2445,6 +2514,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("sizebypass", sizebypass_command))
     app.add_handler(CommandHandler("unsizebypass", unsizebypass_command))
+    app.add_handler(CommandHandler("xbypass", xbypass_command))
+    app.add_handler(CommandHandler("unxbypass", unxbypass_command))
     app.add_handler(CommandHandler("buy", buy_command))
     app.add_handler(CommandHandler("paysupport", paysupport_command))
     app.add_handler(CommandHandler("ban", ban_command))
