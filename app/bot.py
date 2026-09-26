@@ -2503,6 +2503,16 @@ def build_application() -> Application:
         .base_url(config.BASE_URL)
         .base_file_url(config.BASE_FILE_URL)
         .local_mode(False)
+        # مهلة رفع الملفات الوسائطية (فيديو/صوت/صور) لـ Local Bot API. الافتراضي 20 ثانية
+        # قليل جداً لملفات كبيرة (80+ ميكا) خصوصاً وقت ازدحام السيرفر، وكان يسبب
+        # "telegram.error.TimedOut" أثناء send_video رغم إن الرفع كان شغال فعلياً بالخلفية.
+        .media_write_timeout(300)
+        # مهلة عامة للقراءة/الكتابة والاتصال - رفعناها بهامش معقول فوق الافتراضي (5 ثواني)
+        # حتى الطلبات العادية (نصوص، أزرار) ما تتأثر بأي تذبذب بسيط بالشبكة.
+        .read_timeout(60)
+        .write_timeout(60)
+        .connect_timeout(30)
+        .pool_timeout(30)
         .build()
     )
 
