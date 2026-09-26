@@ -192,6 +192,7 @@ LIMIT_LABELS = {
     "size_limit_duration_hours": "مدة لمت الحجم (ساعات)",
     "size_limit_small_mb": "أقصى حجم مسموح أثناء اللمت (ميكا)",
     "direct_link_threshold_mb": "حد تفعيل الرابط المباشر لمنصة X (ميكا)",
+    "error_sticker_autodelete_sec": "مدة حذف ستيكر الفشل",
 }
 LIMIT_UNITS = {
     "max_file_size_mb": "ميكا",
@@ -210,6 +211,7 @@ LIMIT_UNITS = {
     "size_limit_duration_hours": "ساعة",
     "size_limit_small_mb": "ميكا",
     "direct_link_threshold_mb": "ميكا",
+    "error_sticker_autodelete_sec": "ثانية",
 }
 
 STICKER_LABELS = {
@@ -296,6 +298,7 @@ def _get_limit_value(key: str) -> int:
         "size_limit_duration_hours": 6,
         "size_limit_small_mb": 30,
         "direct_link_threshold_mb": 250,
+        "error_sticker_autodelete_sec": 2,
     }
     return int(db.get_setting(key, defaults.get(key, 0)))
 
@@ -1089,10 +1092,35 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )],
             [InlineKeyboardButton("⏱️ لمت حجم الملفات (توفير البندويث)", callback_data="adm:size_limit_menu")],
             [InlineKeyboardButton("🔗 الرابط المباشر (X)", callback_data="adm:direct_link_menu")],
+            [InlineKeyboardButton("🗑️ حذف ستيكر الفشل تلقائياً", callback_data="adm:error_sticker_menu")],
             [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")],
         ]
         await query.edit_message_text(
             "اضغط على الحد اللي تريد تغيره 👇", reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    elif data == "adm:error_sticker_menu" or data == "adm:error_sticker_toggle":
+        if data == "adm:error_sticker_toggle":
+            db.set_setting("error_sticker_autodelete_enabled", not db.get_setting("error_sticker_autodelete_enabled", True))
+            await query.answer("تم التغيير ✅")
+        enabled = db.get_setting("error_sticker_autodelete_enabled", True)
+        buttons = [
+            [InlineKeyboardButton(
+                f"حذف ستيكر الفشل تلقائياً: {'🟢 مفعّل' if enabled else '🔴 موقف'}", callback_data="adm:error_sticker_toggle",
+            )],
+            [InlineKeyboardButton(
+                f"⏱️ {LIMIT_LABELS['error_sticker_autodelete_sec']}: {_get_limit_value('error_sticker_autodelete_sec')} ثانية",
+                callback_data="adm:limit_edit:error_sticker_autodelete_sec",
+            )],
+            [InlineKeyboardButton("⬅️ رجوع", callback_data="adm:limits")],
+        ]
+        await query.edit_message_text(
+            "🗑️ *حذف ستيكر الفشل تلقائياً*\n\n"
+            "ستيكر الفشل يطلع لكل المنصات لما يصير خطأ بالتحميل، ويبقى بالمحادثة إلى الأبد "
+            "افتراضياً (بعكس ستيكر الرفع اللي ينمسح فور نجاح التحميل). هذا الإعداد يخلي "
+            "ستيكر الفشل ينحذف تلقائياً بعد المدة المحددة، لكل المنصات مع بعض.\n\n"
+            "غيّر أي قيمة 👇",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
         )
 
     elif data == "adm:direct_link_menu" or data == "adm:direct_link_toggle":
@@ -2192,7 +2220,12 @@ async def _resolve_upload_sticker_error(context: ContextTypes.DEFAULT_TYPE, chat
     error_sticker = db.get_sticker(f"error_{platform}")
     if error_sticker:
         try:
-            await context.bot.send_sticker(chat_id, error_sticker)
+            sent = await context.bot.send_sticker(chat_id, error_sticker)
+            # ستيكر الفشل يُحذف تلقائياً بعد المدة المحددة (تختلف عن ستيكر الرفع الذي
+            # يُحذف فوراً عند النجاح) - قابل للتشغيل/الإيقاف والتحكم بالمدة من /admin.
+            if db.get_setting("error_sticker_autodelete_enabled", True):
+                seconds = _get_limit_value("error_sticker_autodelete_sec")
+                await _schedule_auto_delete_seconds(context, chat_id, sent.message_id, seconds)
         except Exception:
             logger.exception("failed to send error sticker")
 
