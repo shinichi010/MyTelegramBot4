@@ -1751,7 +1751,16 @@ async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         effective_chat=query.message.chat,
         callback_query=None,
     )
-    await _process_single_link(fake_update, context, user, platform, url, fail_count)
+    try:
+        await _process_single_link(fake_update, context, user, platform, url, fail_count)
+    finally:
+        # نحذف رسالة "جاري إعادة المحاولة" دائماً بعد انتهاء المعالجة (نجحت او فشلت او
+        # حتى انرمى استثناء غير متوقع) - كانت تبقى عالقة للأبد لأن دوال المعالجة ترد
+        # عليها برسائل جديدة (reply_text) بس ما تحذفها هي نفسها بأي مسار.
+        try:
+            await placeholder.delete()
+        except Exception:
+            pass
 
 
 def _fallback_download(platform: str, url: str):
