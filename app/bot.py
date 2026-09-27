@@ -1499,6 +1499,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     raw_text = update.message.text or ""
 
+    # رد بنقطة (.) وحيدة على رسالة قديمة فيها رابط = "حمّل هذا الرابط مرة ثانية".
+    # نشترط النقطة تحديداً حتى رد عادي (شكراً، تمام...) ما يشغّل تحميل بالغلط.
+    reply = getattr(update.message, "reply_to_message", None)
+    if raw_text.strip() == "." and reply is not None:
+        original_text = reply.text or reply.caption or ""
+        redo_links = _extract_all_links(original_text)
+        if redo_links:
+            is_group_redo = update.effective_chat.type in ("group", "supergroup")
+            if is_group_redo and db.get_setting("groups_enabled", True) is False:
+                return
+            for platform, url in redo_links:
+                await _process_single_link(update, context, user, platform, url)
+            return
+        await update.message.reply_text(db.get_message("unsupported_link", _lang(user.id)))
+        return
+
     # طبقة حماية إضافية: أي نص يبدأ بـ / (أمر) ما ينحفظ كقيمة تعديل معلقة إطلاقاً،
     # حتى لو وصل لهذا المعالج بأي طريقة - نلغي الحالة المعلقة ونكمل معالجته كنص عادي
     if raw_text.startswith("/"):
