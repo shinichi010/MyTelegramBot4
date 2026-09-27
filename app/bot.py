@@ -543,6 +543,34 @@ async def handle_report_seen(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 
+# الإيموجيات المسموحة رسمياً كـ Reaction عادية بتليگرام (setMessageReaction). أي إيموجي
+# خارج هذي القائمة يرفضه تليگرام بخطأ - القائمة كاملة حسب توثيق Bot API الرسمي.
+ALLOWED_REACTIONS = [
+    "👍", "👎", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬", "😢", "🎉", "🤩", "🤮",
+    "💩", "🙏", "👌", "🕊", "🤡", "🥱", "🥴", "😍", "🐳", "❤‍🔥", "🌚", "🌭", "💯", "🤣", "⚡",
+    "🍌", "🏆", "💔", "🤨", "😐", "🍓", "🍾", "💋", "🖕", "😈", "😴", "😭", "🤓", "👻", "👨‍💻",
+    "👀", "🎃", "🙈", "😇", "😨", "🤝", "✍", "🤗", "🫡", "🎅", "🎄", "☃", "💅", "🤪", "🗿",
+    "🆒", "💘", "🙉", "🦄", "😘", "💊", "🙊", "😎", "👾", "🤷‍♂", "🤷", "🤷‍♀", "😡",
+]
+
+# مفاتيح إعدادات رياكشنات الرابط (الافتراضي: 👀 عند الاستلام، 👍 عند النجاح، 👎 عند الفشل)
+REACTION_DEFAULTS = {"received": "👀", "success": "👍", "failure": "👎", "no_link": "🤡"}
+
+
+async def _set_link_reaction(context, message, kind: str):
+    """يحط/يبدّل رياكشن على رسالة الرابط الأصلية. kind: received/success/failure.
+    ما يفعل شي لو الميزة موقفة، والفشل بالطلب نفسه (رسالة قديمة، لا صلاحية...) يُتجاهل بأمان
+    بدون ما يوقف عملية التحميل - الرياكشن زينة، مو خطوة أساسية بالعملية."""
+    if not message or not db.get_setting("link_reactions_enabled", True):
+        return
+    emoji = db.get_setting(f"link_reaction_{kind}", REACTION_DEFAULTS[kind])
+    try:
+        await context.bot.set_message_reaction(message.chat_id, message.message_id, reaction=[emoji])
+    except Exception:
+        logger.debug(f"failed to set '{kind}' reaction (ignored)")
+
+
+
 def _lang(user_id: int) -> str:
     """يجيب لغة المستخدم المحفوظة، افتراضياً عربي لو ما اختار بعد."""
     return db.get_user_language(user_id) or "ar"
@@ -761,6 +789,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⚙️ حدود الأحجام (تحميل/طابور)", callback_data="adm:limits")],
         [InlineKeyboardButton("🛠️ وضع الصيانة (إيقاف الرد للمستخدمين)", callback_data="adm:maintenance_toggle")],
         [InlineKeyboardButton("🗑️ حذف رسائل الخطأ تلقائياً", callback_data="adm:autodelete")],
+        [InlineKeyboardButton("😀 رياكشنات الرابط", callback_data="adm:reactions_menu")],
         [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
     ]
     await update.message.reply_text(
@@ -1008,7 +1037,8 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⚙️ حدود الأحجام (تحميل/طابور)", callback_data="adm:limits")],
         [InlineKeyboardButton("🛠️ وضع الصيانة (إيقاف الرد للمستخدمين)", callback_data="adm:maintenance_toggle")],
         [InlineKeyboardButton("🗑️ حذف رسائل الخطأ تلقائياً", callback_data="adm:autodelete")],
-            [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
+            [InlineKeyboardButton("😀 رياكشنات الرابط", callback_data="adm:reactions_menu")],
+        [InlineKeyboardButton("⛔ حظر مستخدم", callback_data="adm:ban_help")],
         ]
         await query.edit_message_text("🛠️ لوحة تحكم الأدمن", reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -1148,6 +1178,69 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "💰 الأرصدة والدفع ← 📦 الباقات والأسعار)، او يدوياً عبر `/xbypass <آيدي>` "
             f"(المعفيين حالياً: {len(bypassed_x)}).\n\n"
             "غيّر أي قيمة 👇",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data == "adm:reactions_menu" or data == "adm:reactions_toggle":
+        if data == "adm:reactions_toggle":
+            db.set_setting("link_reactions_enabled", not db.get_setting("link_reactions_enabled", True))
+            await query.answer("تم التغيير ✅")
+        enabled = db.get_setting("link_reactions_enabled", True)
+        kinds = [("received", "استلام الرابط"), ("success", "نجاح التحميل"),
+                 ("failure", "فشل التحميل"), ("no_link", "رسالة بلا رابط")]
+        buttons = [[InlineKeyboardButton(
+            f"رياكشنات الرابط: {'🟢 مفعّلة' if enabled else '🔴 موقفة'}", callback_data="adm:reactions_toggle",
+        )]]
+        for key, label in kinds:
+            emoji = db.get_setting(f"link_reaction_{key}", REACTION_DEFAULTS[key])
+            buttons.append([InlineKeyboardButton(f"{label}: {emoji}", callback_data=f"adm:reaction_pick:{key}")])
+        buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")])
+        await query.edit_message_text(
+            "😀 *رياكشنات الرابط*\n\n"
+            "لما مستخدم يرسل رابط، البوت يحط رياكشن 👀 عليه فوراً، وبعدها يبدّله لرياكشن "
+            "النجاح او الفشل حسب نتيجة التحميل. رسالة بدون رابط (غير النقطة) تاخذ رياكشن "
+            "منفصل. كل هذا للإرسال المباشر الأول فقط، ما يشمل أزرار إعادة المحاولة.\n\n"
+            "اضغط أي نوع لتغيير رمزه 👇",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data.startswith("adm:reaction_pick:"):
+        kind = data.split(":", 2)[2]
+        current = db.get_setting(f"link_reaction_{kind}", REACTION_DEFAULTS.get(kind, "👍"))
+        # قائمة مختارة من أكثر الإيموجيات المسموحة استخداماً (كلها من ALLOWED_REACTIONS)
+        # بدل عرض الـ 70+ كامل بشاشة وحدة - تجنباً لتجاوز حد أزرار تيليگرام والإرباك.
+        common = ["👍", "👎", "❤", "🔥", "🎉", "😁", "😢", "😱", "🤔", "👀", "🤡", "💯",
+                  "🙏", "👌", "😍", "😎", "🤝", "⚡", "🏆", "💔"]
+        rows = []
+        for i in range(0, len(common), 4):
+            row = common[i:i + 4]
+            rows.append([InlineKeyboardButton(
+                ("✅" if e == current else "") + e, callback_data=f"adm:reaction_set:{kind}:{e}"
+            ) for e in row])
+        rows.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:reactions_menu")])
+        label = {"received": "استلام الرابط", "success": "نجاح التحميل",
+                 "failure": "فشل التحميل", "no_link": "رسالة بلا رابط"}.get(kind, kind)
+        await query.edit_message_text(f"اختار رمز '{label}' 👇", reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("adm:reaction_set:"):
+        _, _, kind, emoji = data.split(":", 3)
+        if emoji not in ALLOWED_REACTIONS:
+            await query.answer("رمز غير مدعوم من تيليگرام ❌", show_alert=True)
+        else:
+            db.set_setting(f"link_reaction_{kind}", emoji)
+            await query.answer(f"تم ✅ {emoji}")
+        kinds = [("received", "استلام الرابط"), ("success", "نجاح التحميل"),
+                 ("failure", "فشل التحميل"), ("no_link", "رسالة بلا رابط")]
+        enabled = db.get_setting("link_reactions_enabled", True)
+        buttons = [[InlineKeyboardButton(
+            f"رياكشنات الرابط: {'🟢 مفعّلة' if enabled else '🔴 موقفة'}", callback_data="adm:reactions_toggle",
+        )]]
+        for k, label in kinds:
+            e = db.get_setting(f"link_reaction_{k}", REACTION_DEFAULTS[k])
+            buttons.append([InlineKeyboardButton(f"{label}: {e}", callback_data=f"adm:reaction_pick:{k}")])
+        buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data="adm:back")])
+        await query.edit_message_text(
+            "😀 *رياكشنات الرابط*\n\nاضغط أي نوع لتغيير رمزه 👇",
             parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons),
         )
 
@@ -1574,6 +1667,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     links = _extract_all_links(text)
 
     if not links:
+        # رسالة بدون رابط (وليست نقطة إعادة تحميل، مستبعدة فوق أصلاً) - رياكشن 🤡 افتراضياً
+        await _set_link_reaction(context, update.message, "no_link")
         # بالمجاميع/القنوات نتجاهل الرسائل العادية بصمت حتى ما نزعج المحادثة
         if not is_group:
             await update.message.reply_text(db.get_message("unsupported_link", _lang(user.id)))
@@ -1581,6 +1676,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_group and db.get_setting("groups_enabled", True) is False:
         return
+
+    # رياكشن استلام فوري (👀 افتراضياً) على رسالة المستخدم - يعطيه تأكيد بصري إن البوت
+    # استلم الرابط. الرابط يبدّله لاحقاً لرياكشن النجاح/الفشل بعد ما تنحسم النتيجة.
+    await _set_link_reaction(context, update.message, "received")
 
     if len(links) > 1:
         await update.message.reply_text(
@@ -2317,13 +2416,19 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
             await _send_error_with_retry(
                 context, chat_id, msg, no_files_msg, url, platform, fail_count + 1, lang, update.effective_user
             )
+            if fail_count == 0:
+                await _set_link_reaction(context, update.message, "failure")
             return
 
         if not _check_size_ok(files):
             await msg.edit_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
+            if fail_count == 0:
+                await _set_link_reaction(context, update.message, "failure")
             return
         if not _size_limit_allows(update.effective_user.id, _total_size(files)):
             await msg.edit_text(_size_limit_message(lang))
+            if fail_count == 0:
+                await _set_link_reaction(context, update.message, "failure")
             return
 
         if _total_size(files) >= _heavy_threshold_bytes():
@@ -2348,6 +2453,8 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         )]])
         _maybe_trigger_size_limit(update.effective_user.id, _total_size(files))
         _record_download_success(platform)
+        if fail_count == 0:
+            await _set_link_reaction(context, update.message, "success")
         try:
             await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files), reply_markup=audio_btn)
         except Exception:
@@ -2356,6 +2463,8 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
         await _send_error_with_retry(context, chat_id, msg, str(e), url, platform, fail_count + 1, lang, update.effective_user)
+        if fail_count == 0:
+            await _set_link_reaction(context, update.message, "failure")
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
@@ -2411,6 +2520,9 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     await context.bot.send_chat_action(query.message.chat_id, ChatAction.UPLOAD_VIDEO)
 
     chat_id = query.message.chat_id
+    # نحفظ مرجع رسالة المستخدم الأصلية (قبل ما نحذف رسالة قائمة الجودات تحت) حتى نقدر
+    # نبدّل رياكشنها لنجاح/فشل لما تنحسم النتيجة - reply_text تضبط reply_to_message تلقائياً.
+    original_msg = getattr(query.message, "reply_to_message", None)
     files = []
     took_heavy_slot = False
     x_big_file = False  # يتعدل لاحقاً فقط لو المنصة X وتجاوز حد الرابط المباشر بتخطي مدفوع
@@ -2426,6 +2538,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 direct_url = await downloader.get_direct_url(url, platform, height)
                 if direct_url:
                     await _offer_direct_link(query, lang, direct_url)
+                    await _set_link_reaction(context, original_msg, "success")
                     return
                 # ما لقينا رابط مباشر (نادر) - نكمل بالتحميل العادي كخطة احتياط
 
@@ -2446,6 +2559,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 direct_url = await downloader.get_direct_url(url, platform, height)
                 if direct_url:
                     await _offer_direct_link(query, lang, direct_url)
+                    await _set_link_reaction(context, original_msg, "success")
                     return
                 # ما لقينا رابط مباشر (نادر) - نكمل بالفحص العادي تحت كخطة احتياط
         elif (not is_audio and platform == "x" and db.get_setting("direct_link_enabled", True)):
@@ -2456,9 +2570,11 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
         if not _check_size_ok(files):
             await query.edit_message_text(db.get_message("file_too_large", lang, max_size=_max_file_size_mb()))
+            await _set_link_reaction(context, original_msg, "failure")
             return
         if not _size_limit_allows(query.from_user.id, _total_size(files)):
             await query.edit_message_text(_size_limit_message(lang))
+            await _set_link_reaction(context, original_msg, "failure")
             return
 
         if _total_size(files) >= _heavy_threshold_bytes():
@@ -2474,8 +2590,10 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 await _send_file(update, context, path, chat_id=chat_id, display_name=display_name)
         except Exception:
             await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
+            await _set_link_reaction(context, original_msg, "failure")
             raise
         await _resolve_upload_sticker_success(sticker_msg)
+        await _set_link_reaction(context, original_msg, "success")
         _maybe_trigger_size_limit(query.from_user.id, _total_size(files))
         _record_download_success(platform)
         # X: نخصم رصيد فقط لو الملف تجاوز الحد فعلاً واستخدم تخطي مدفوع (مو أدمن/إعفاء يدوي).
@@ -2492,6 +2610,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
         await _send_error_with_retry(context, chat_id, query.message, str(e), url, platform, lang=lang, user=query.from_user)
+        await _set_link_reaction(context, original_msg, "failure")
     finally:
         downloader.cleanup(files)
         if took_heavy_slot:
