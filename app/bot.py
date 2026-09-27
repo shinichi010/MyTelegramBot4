@@ -1726,13 +1726,19 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
 
     if _verify_link_enabled(user.id):
         check_msg = await update.message.reply_text(db.get_message("verifying_link", lang))
-        ok = await downloader.verify_link(url, platform)
+        ok, verify_error = await downloader.verify_link(url, platform)
         await check_msg.delete()
         if not ok:
             text = db.get_message("link_verify_failed", lang, url=url)
-            keyboard = _retry_keyboard(url, platform, fail_count + 1, lang)
+            report_id = await _report_error_to_dev(context, "التحقق من الرابط", user, platform, url, verify_error or "unknown verification failure")
+            keyboard = InlineKeyboardMarkup(
+                list(_retry_keyboard(url, platform, fail_count + 1, lang).inline_keyboard)
+                + list(_report_button(report_id, lang).inline_keyboard)
+            )
             sent = await update.message.reply_text(text, reply_markup=keyboard)
             await _schedule_auto_delete(context, sent.chat_id, sent.message_id, "download_error")
+            if fail_count == 0:
+                await _set_link_reaction(context, update.message, "failure")
             return
 
     if _preview_enabled(user.id):
