@@ -297,10 +297,12 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
     return files, meta
 
 
-async def verify_link(url: str, platform: str) -> bool:
+async def verify_link(url: str, platform: str) -> tuple[bool, str | None]:
     """يتحقق ان الرابط شغال وقابل للوصول قبل لا نبدأ تحميل فعلي (بدون تحميل فعلي للملف).
     يسوي محاولتين قبل ما يحكم "فشل" - بعض المنصات (خصوصاً دويين) تصير عندها
-    تذبذبات مؤقتة ترجع خطأ لحظي حتى لو الرابط شغال فعلاً."""
+    تذبذبات مؤقتة ترجع خطأ لحظي حتى لو الرابط شغال فعلاً.
+    يرجع (نجح؟, نص الخطأ الحقيقي لو فشل والا None) - نص الخطأ يفيد بتقارير الأخطاء
+    للمطور، كان يُبتلع سابقاً بدون أي تسجيل."""
 
     def _check():
         opts = _base_opts()
@@ -308,17 +310,18 @@ async def verify_link(url: str, platform: str) -> bool:
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=False)
-            return True
-        except Exception:
-            return False
+            return True, None
+        except Exception as e:
+            return False, str(e)
 
-    ok = await asyncio.to_thread(_check)
+    ok, error = await asyncio.to_thread(_check)
     if ok:
-        return True
+        return True, None
 
     # محاولة ثانية بعد مهلة قصيرة - تتجنب الحكم بالفشل بسبب تذبذب لحظي
     await asyncio.sleep(2)
-    return await asyncio.to_thread(_check)
+    ok2, error2 = await asyncio.to_thread(_check)
+    return ok2, (error2 or error) if not ok2 else None
 
 
 async def get_preview(url: str, platform: str) -> dict | None:
