@@ -102,6 +102,8 @@ EDITABLE_MESSAGES = {
     "low_balance_one": "تنبيه: باقي تحميل واحد",
     "low_balance_zero": "تنبيه: خلص الرصيد",
     "size_limit_active": "رسالة لمت حجم الملفات",
+    "free_failed_offer": "فشل المجاني: عرض الطريقة المدفوعة (عنده رصيد)",
+    "free_failed_no_credit": "فشل المجاني: عرض الطريقة المدفوعة (ما عنده رصيد)",
     "direct_link_prompt": "رسالة عرض الرابط المباشر (X)",
     "btn_direct_download": "نص زر تحميل من المتصفح",
     "btn_buy_platform": "نص زر شراء رصيد لمنصة",
@@ -151,6 +153,8 @@ MESSAGE_VARIABLE_HINTS = {
     "fallback_confirm": "المتغيرات: `{platform}` اسم المنصة، `{free_left}` المجانية المتبقية، `{paid_balance}` الرصيد المدفوع.",
     "fallback_no_credit": "المتغير: `{platform}` — اسم المنصة.",
     "multi_links": "المتغير: `{count}` — عدد الروابط.",
+    "free_failed_offer": "المتغيرات: `{free_left}` المجانية المتبقية، `{free_limit}` الحد الأسبوعي، `{paid_balance}` الرصيد المدفوع.",
+    "free_failed_no_credit": "المتغير: `{free_limit}` — الحد الأسبوعي للمحاولات المجانية.",
     "low_balance_one": "المتغير: `{platform}` — اسم المنصة.",
     "low_balance_zero": "المتغير: `{platform}` — اسم المنصة.",
     "shop_platform_title": "المتغير: `{platform}` — اسم المنصة.",
@@ -1729,16 +1733,24 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
         ok, verify_error = await downloader.verify_link(url, platform)
         await check_msg.delete()
         if not ok:
-            text = db.get_message("link_verify_failed", lang, url=url)
             report_id = await _report_error_to_dev(context, "التحقق من الرابط", user, platform, url, verify_error or "unknown verification failure")
+            if fail_count == 0:
+                await _set_link_reaction(context, update.message, "failure")
+            if _paid_offer_applies(platform):
+                # دويين/RedNote: بدل رسالة الخطأ العامة نعرض الطريقة المدفوعة مباشرة
+                # (التقرير للقناة انرسل فوق، والرياكشن انحط)
+                await _offer_paid_after_free_failure(
+                    context, update.effective_chat.id, None, user, url, platform,
+                    origin_msg=update.message if fail_count == 0 else None,
+                )
+                return
+            text = db.get_message("link_verify_failed", lang, url=url)
             keyboard = InlineKeyboardMarkup(
                 list(_retry_keyboard(url, platform, fail_count + 1, lang).inline_keyboard)
                 + list(_report_button(report_id, lang).inline_keyboard)
             )
             sent = await update.message.reply_text(text, reply_markup=keyboard)
             await _schedule_auto_delete(context, sent.chat_id, sent.message_id, "download_error")
-            if fail_count == 0:
-                await _set_link_reaction(context, update.message, "failure")
             return
 
     if _preview_enabled(user.id):
@@ -1825,10 +1837,35 @@ async def _schedule_auto_delete_seconds(context, chat_id: int, message_id: int, 
     asyncio.create_task(_delete_later())
 
 
+def _paid_offer_applies(platform: str) -> bool:
+    """هل نعرض عرض الطريقة المدفوعة بدل رسالة الخطأ العادية عند فشل التحميل المجاني؟
+    فقط لدويين وRedNote، لما المحاولة البديلة مفعّلة وTikHub مضبوط. غير كذا نرجع للسلوك القديم
+    (أعد المحاولة/إلغاء/إبلاغ) لأنو ما موجود بديل نعرضه للمستخدم."""
+    return (
+        platform in ("douyin", "rednote")
+        and tikhub.is_configured()
+        and db.get_setting(f"{platform}_fallback_enabled", True)
+    )
+
+
+async def _offer_paid_after_free_failure(context, chat_id: int, msg, user, url: str, platform: str, origin_msg=None):
+    """يعرض رسالة "فشل التحميل المجاني + الطريقة المدفوعة" مكان رسالة الخطأ العادية.
+    يعدّل الرسالة الموجودة (msg) لو أمكن، وإلا يرسل وحدة جديدة."""
+    await _show_fallback_prompt(
+        context, chat_id, user, url, platform,
+        edit_message=msg, after_free_failure=True, origin_msg=origin_msg,
+    )
+
+
 async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1, lang: str = "ar", user=None):
     """يعرض رسالة الخطأ مع زر إعادة المحاولة + زر الإبلاغ. يبلغ المطور تلقائياً بالخطأ الحقيقي."""
     text = db.get_message("download_error", lang)
     report_id = await _report_error_to_dev(context, "تحميل فيديو", user, platform, url, error)
+    if user is not None and _paid_offer_applies(platform):
+        # دويين/RedNote: فشل المجاني يعرض الطريقة المدفوعة مباشرة (التقرير للقناة انرسل فوق)
+        origin = getattr(msg, "reply_to_message", None) if fail_count == 0 else None
+        await _offer_paid_after_free_failure(context, chat_id, msg, user, url, platform, origin_msg=origin)
+        return
     keyboard = InlineKeyboardMarkup(
         list(_retry_keyboard(url, platform, fail_count, lang).inline_keyboard)
         + list(_report_button(report_id, lang).inline_keyboard)
@@ -1899,13 +1936,17 @@ FALLBACK_DOWNLOAD_FUNCS = {
 
 # تخزين مؤقت: confirm_id قصير -> (url, platform) لتأكيد استخدام المحاولة البديلة
 FALLBACK_CONFIRM_PENDING: dict[str, tuple[str, str]] = {}
+# نفس confirm_id -> رسالة المستخدم الأصلية (فيها الرابط)، لتبديل رياكشنها لـ 👍 لو نجحت الطريقة
+# المدفوعة بعد فشل المجانية. قاموس منفصل عمداً حتى ما نغيّر شكل FALLBACK_CONFIRM_PENDING (يُفكّ بأكثر من مكان).
+FALLBACK_ORIGIN_MSG: dict[str, object] = {}
 
 
 def _fallback_supported(platform: str) -> bool:
     return platform in FALLBACK_DOWNLOAD_FUNCS or platform == "wechat"
 
 
-async def _show_fallback_prompt(context, chat_id: int, user, url: str, platform: str, edit_message=None):
+async def _show_fallback_prompt(context, chat_id: int, user, url: str, platform: str, edit_message=None,
+                                after_free_failure: bool = False, origin_msg=None):
     """يعرض رسالة المحاولة البديلة حسب وضع المستخدم (3 حالات):
        1) الدفع موقف          -> السلوك القديم (مجاني متبقي فقط، بدون شراء)
        2) عنده رصيد/مجاني     -> تأكيد مع تفصيل الرصيدين (المجاني + المدفوع)
@@ -1926,23 +1967,38 @@ async def _show_fallback_prompt(context, chat_id: int, user, url: str, platform:
 
     if is_admin:
         FALLBACK_CONFIRM_PENDING[confirm_id] = (url, platform)
+        if origin_msg is not None:
+            FALLBACK_ORIGIN_MSG[confirm_id] = origin_msg
         text = db.get_message("fallback_admin", lang)
         markup = InlineKeyboardMarkup([[InlineKeyboardButton(use_label, callback_data=f"fbconfirm:{confirm_id}")],
                                        [_cancel_btn(confirm_id)]])
 
     elif avail["can_use"]:
         FALLBACK_CONFIRM_PENDING[confirm_id] = (url, platform)
-        text = db.get_message(
-            "fallback_confirm", lang,
-            platform=pname, free_left=avail["free_left"], paid_balance=avail["paid"],
-        )
+        if origin_msg is not None:
+            FALLBACK_ORIGIN_MSG[confirm_id] = origin_msg
+        if after_free_failure:
+            # فشل المجاني (المكتبة): رسالة تعرض "x من y" مجانية والرصيد المدفوع
+            text = db.get_message(
+                "free_failed_offer", lang,
+                free_left=avail["free_left"], free_limit=wallet.get_weekly_free_limit(platform),
+                paid_balance=avail["paid"],
+            )
+        else:
+            text = db.get_message(
+                "fallback_confirm", lang,
+                platform=pname, free_left=avail["free_left"], paid_balance=avail["paid"],
+            )
         markup = InlineKeyboardMarkup([[InlineKeyboardButton(use_label, callback_data=f"fbconfirm:{confirm_id}")],
                                        [_cancel_btn(confirm_id)]])
 
     elif pay_on:
         # ما عنده شي: نعرض زر شراء، ونحفظ الرابط حتى نكمل تلقائياً بعد الدفع
         payments.RESUME_AFTER_PURCHASE[user.id] = (url, platform)
-        text = db.get_message("fallback_no_credit", lang, platform=pname)
+        if after_free_failure:
+            text = db.get_message("free_failed_no_credit", lang, free_limit=wallet.get_weekly_free_limit(platform))
+        else:
+            text = db.get_message("fallback_no_credit", lang, platform=pname)
         buy_label = db.get_message("btn_buy_platform", lang, platform=pname)
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton(buy_label, callback_data=f"buy:plat:{platform}")],
@@ -2001,6 +2057,7 @@ async def handle_fallback_cancel(update: Update, context: ContextTypes.DEFAULT_T
     except ValueError:
         return
     pending = FALLBACK_CONFIRM_PENDING.pop(confirm_id, None)
+    FALLBACK_ORIGIN_MSG.pop(confirm_id, None)
     if pending:
         payments.RESUME_AFTER_PURCHASE.pop(query.from_user.id, None)
     else:
@@ -2011,7 +2068,7 @@ async def handle_fallback_cancel(update: Update, context: ContextTypes.DEFAULT_T
         pass
 
 
-async def _run_fallback_download(update, context, user, chat_id: int, url: str, platform: str):
+async def _run_fallback_download(update, context, user, chat_id: int, url: str, platform: str, origin_msg=None):
     """ينفذ المحاولة البديلة فعلياً. الخصم يصير بعد نجاح الإرسال (مو قبل)."""
     lang = _lang(user.id)
     status = await context.bot.send_message(chat_id, db.get_message("fallback_retrying", lang))
@@ -2043,6 +2100,8 @@ async def _run_fallback_download(update, context, user, chat_id: int, url: str, 
             await _resolve_upload_sticker_error(context, chat_id, platform, sticker_msg)
             raise
         await _resolve_upload_sticker_success(sticker_msg)
+        # نجحت الطريقة المدفوعة بعد فشل المجانية: نبدّل رياكشن 👎 لـ 👍 حتى ما يبين التحميل فاشل
+        await _set_link_reaction(context, origin_msg, "success")
 
         # الخصم بعد نجاح الإرسال الفعلي فقط. الأدمن ما ينخصم منه شي.
         if not _is_admin(user.id):
@@ -2139,13 +2198,14 @@ async def handle_fallback_confirm(update: Update, context: ContextTypes.DEFAULT_
     url, platform = pending
     user = query.from_user
     chat_id = query.message.chat_id
+    origin_msg = FALLBACK_ORIGIN_MSG.pop(confirm_id, None)
 
     try:
         await query.message.delete()
     except Exception:
         pass
 
-    await _run_fallback_download(update, context, user, chat_id, url, platform)
+    await _run_fallback_download(update, context, user, chat_id, url, platform, origin_msg=origin_msg)
 
 
 async def _resume_after_purchase(update, context, url: str, platform: str):
