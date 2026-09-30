@@ -472,6 +472,40 @@ DEFAULT_MESSAGES = {
         "ar": "📥 حمل من المتصفح",
         "en": "📥 Download from browser",
     },
+    "free_failed_offer": {
+        "ar": (
+            "❌ فشل التحميل المجاني.\n"
+            "يمكنك التحميل بطريقة أخرى مدفوعة 👇\n\n"
+            "🎁 عندك {free_left} من {free_limit} محاولات مجانية هذا الأسبوع\n"
+            "💎 رصيدك المدفوع: {paid_balance}\n\n"
+            "راح تُستهلك من المجانية أولاً، وبعدها من رصيدك المدفوع.\n"
+            "ما ينخصم شي إلا بعد ما يوصلك الفيديو ✅"
+        ),
+        "en": (
+            "❌ The free download failed.\n"
+            "You can download another way (paid) 👇\n\n"
+            "🎁 You have {free_left} of {free_limit} free attempts this week\n"
+            "💎 Your paid balance: {paid_balance}\n\n"
+            "Free attempts are used first, then your paid balance.\n"
+            "Nothing is deducted until the video is delivered ✅"
+        ),
+    },
+    "free_failed_no_credit": {
+        "ar": (
+            "❌ فشل التحميل المجاني.\n"
+            "يمكنك التحميل بطريقة أخرى مدفوعة 👇\n\n"
+            "🎁 عندك 0 من {free_limit} محاولات مجانية هذا الأسبوع\n"
+            "💎 رصيدك المدفوع: 0\n\n"
+            "اشترِ تحميلات بالنجوم ⭐ وراح ينزل هذا الفيديو تلقائياً بعد الدفع."
+        ),
+        "en": (
+            "❌ The free download failed.\n"
+            "You can download another way (paid) 👇\n\n"
+            "🎁 You have 0 of {free_limit} free attempts this week\n"
+            "💎 Your paid balance: 0\n\n"
+            "Buy downloads with Stars ⭐ and this video will download automatically after payment."
+        ),
+    },
 }
 
 
