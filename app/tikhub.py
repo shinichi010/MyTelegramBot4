@@ -119,25 +119,103 @@ def fetch_rednote_video_detail(share_text: str) -> dict:
     return resp.json()
 
 
+# أفضلية الترميز: h264 يشتغل بكل أجهزة تيليگرام، h265 احتياط، والباقي (av1/h266) آخر خيار
+_CODEC_PRIORITY = ("h264", "h265", "av1", "h266")
+
+
+def _pick_stream_url(stream) -> str | None:
+    """يختار رابط فيديو من قاموس stream (مفاتيحه الترميزات: h264/h265/av1/h266...)."""
+    if not isinstance(stream, dict):
+        return None
+    codecs = list(_CODEC_PRIORITY) + [k for k in stream if k not in _CODEC_PRIORITY]
+    for codec in codecs:
+        items = stream.get(codec) or []
+        if isinstance(items, dict):
+            items = [items]
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("master_url") or item.get("masterUrl")
+            if not url:
+                backups = item.get("backup_urls") or item.get("backupUrls") or []
+                url = backups[0] if isinstance(backups, list) and backups else None
+            if isinstance(url, str) and url.startswith("http"):
+                return url
+    return None
+
+
+def _walk_dicts(obj, depth: int = 0):
+    """يمشي على كل القواميس داخل الاستجابة (الأعلى أولاً) بعمق محدود."""
+    if depth > 8:
+        return
+    if isinstance(obj, dict):
+        yield obj
+        for v in obj.values():
+            yield from _walk_dicts(v, depth + 1)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_dicts(v, depth + 1)
+
+
+def _shape_summary(detail) -> str:
+    """وصف مختصر لهيكل الاستجابة (مفاتيح فقط، بدون محتوى) - يظهر بتقرير الخطأ للمطور
+    حتى لو تغير شكل استجابة TikHub نعرف بالضبط شنو رجع."""
+    try:
+        data = detail.get("data") if isinstance(detail, dict) else detail
+        parts = [f"top={sorted(detail.keys())[:8]}" if isinstance(detail, dict) else f"top={type(detail).__name__}"]
+        if isinstance(data, dict):
+            parts.append(f"data={sorted(data.keys())[:10]}")
+            inner = data.get("data")
+            if isinstance(inner, list) and inner and isinstance(inner[0], dict):
+                parts.append(f"data.data[0]={sorted(inner[0].keys())[:14]}")
+            elif isinstance(inner, dict):
+                parts.append(f"data.data={sorted(inner.keys())[:14]}")
+        elif isinstance(data, list) and data and isinstance(data[0], dict):
+            parts.append(f"data[0]={sorted(data[0].keys())[:14]}")
+        return " | ".join(parts)[:350]
+    except Exception:
+        return "shape unavailable"
+
+
 def _extract_rednote_media(detail: dict) -> dict:
-    """يستخرج رابط تحميل الفيديو الصافي ومعلومات صاحب المنشور من استجابة RedNote."""
-    data = detail.get("data", {})
-    note = data.get("note", data)  # بعض الاستجابات تجي مباشرة بدون مفتاح note
+    """يستخرج رابط تحميل الفيديو الصافي ومعلومات صاحب المنشور من استجابة RedNote.
+    الشكل الحالي لاستجابة TikHub (app_v2): data.data[0].video_info_v2.media.stream.<codec>[0].master_url
+    ونبقي الأشكال القديمة (data.note.video...) كاحتياط، مع بحث عام لو تغير الهيكل مرة ثانية."""
+    note = None
+    download_url = None
 
-    video = note.get("video", {})
-    download_url = video.get("masterUrl") or video.get("master_url")
-    if not download_url:
-        backup_urls = video.get("backupUrls") or video.get("backup_urls") or []
-        download_url = backup_urls[0] if backup_urls else None
-    if not download_url:
-        raise ValueError("ماكو رابط تحميل بهذا المنشور")
+    for node in _walk_dicts(detail):
+        url = None
+        vi = node.get("video_info_v2")
+        if isinstance(vi, dict):
+            url = _pick_stream_url((vi.get("media") or {}).get("stream"))
+        if not url:
+            video = node.get("video")
+            if isinstance(video, dict):
+                # شكل قديم: video.media.stream، او رابط مباشر داخل video
+                url = _pick_stream_url((video.get("media") or {}).get("stream"))
+                if not url:
+                    url = video.get("masterUrl") or video.get("master_url")
+                if not url:
+                    backups = video.get("backupUrls") or video.get("backup_urls") or []
+                    url = backups[0] if isinstance(backups, list) and backups else None
+        if isinstance(url, str) and url.startswith("http"):
+            note, download_url = node, url
+            break
 
-    user = note.get("user", {})
+    if not download_url:
+        raise ValueError(f"ماكو رابط تحميل بهذا المنشور | {_shape_summary(detail)}")
+
+    user = note.get("user") or note.get("author") or {}
+    if not isinstance(user, dict):
+        user = {}
 
     return {
         "download_url": download_url,
-        "uploader": user.get("nickname") or "",
-        "uploader_id": user.get("userId") or user.get("user_id") or "",
+        "uploader": user.get("nickname") or user.get("name") or "",
+        "uploader_id": user.get("userId") or user.get("user_id") or user.get("userid") or user.get("id") or "",
         "description": note.get("desc") or note.get("title") or "",
     }
 
