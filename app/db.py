@@ -28,25 +28,25 @@ DEFAULT_MESSAGES = {
         "ar": (
             "هلا والف هلا بيك 👋\n\n"
             "ارسلي رابط فيديو من X ( تويتر )، دويين ( التيك توك الصيني )، ويشات ( WeChat )، "
-            "RedNote ( شياوخونغشو )، او Bilibili وراح أنزلك المحتوى.\n\n"
+            "RedNote ( شياوخونغشو )، Bilibili، او Alipay وراح أنزلك المحتوى.\n\n"
             "💠 روابط X، RedNote، وBilibili: راح تطلع الك خيارات جودة (مع الحجم) تختار منها.\n"
-            "💠 روابط دويين وويشات: يتنزل تلقائياً بأعلى جودة متوفرة (فيديو او صور).\n\n"
+            "💠 روابط دويين وويشات وAlipay: يتنزل تلقائياً بأعلى جودة متوفرة (فيديو او صور).\n\n"
             "📊 ارسل /stats حتى تشوف إحصائياتك وتتحكم بإعداداتك الشخصية "
             "(معلومات المنشور، التحقق من الرابط، المعاينة السريعة)."
         ),
         "en": (
             "Hey there 👋\n\n"
             "Send me a video link from X (Twitter), Douyin (Chinese TikTok), WeChat Channels, "
-            "RedNote (Xiaohongshu), or Bilibili and I'll download it for you.\n\n"
+            "RedNote (Xiaohongshu), Bilibili, or Alipay and I'll download it for you.\n\n"
             "💠 X, RedNote, and Bilibili links: you'll get quality options (with size) to choose from.\n"
-            "💠 Douyin and WeChat links: downloaded automatically at the best available quality (video or photos).\n\n"
+            "💠 Douyin, WeChat and Alipay links: downloaded automatically at the best available quality (video or photos).\n\n"
             "📊 Send /stats to see your stats and control your personal settings "
             "(post info, link verification, quick preview)."
         ),
     },
     "unsupported_link": {
-        "ar": "بس روابط X، دويين، ويشات، RedNote، او Bilibili مدعومة حالياً 🙏",
-        "en": "Only X, Douyin, WeChat, RedNote, or Bilibili links are supported right now 🙏",
+        "ar": "بس روابط X، دويين، ويشات، RedNote، Bilibili، او Alipay مدعومة حالياً 🙏",
+        "en": "Only X, Douyin, WeChat, RedNote, Bilibili, or Alipay links are supported right now 🙏",
     },
     "fetching_qualities": {
         "ar": "🔍 اجيب خيارات الجودة...",
@@ -201,10 +201,10 @@ DEFAULT_MESSAGES = {
             "/buy — شراء تحميلات بالنجوم ⭐\n"
             "/help — هذي الرسالة\n\n"
             "📎 *شلون تستخدم البوت*\n"
-            "بس ارسل رابط من X، دويين، ويشات، RedNote، او Bilibili — تقدر ترسل عدة "
+            "بس ارسل رابط من X، دويين، ويشات، RedNote، Bilibili، او Alipay — تقدر ترسل عدة "
             "روابط بنفس الرسالة وراح انزلهن وحدة وحدة بالترتيب.\n\n"
             "▪️ روابط X، RedNote، وBilibili: تطلع الك خيارات جودة مع الحجم تختار منها.\n"
-            "▪️ روابط دويين وويشات: تتنزل تلقائياً بأعلى جودة متوفرة.\n"
+            "▪️ روابط دويين وويشات وAlipay: تتنزل تلقائياً بأعلى جودة متوفرة.\n"
             "▪️ اي فيديو تكدر تحمل الصوت بس منه (MP3) بزر منفصل."
         ),
         "en": (
@@ -214,10 +214,10 @@ DEFAULT_MESSAGES = {
             "/buy — Buy downloads with Stars ⭐\n"
             "/help — This message\n\n"
             "📎 *How to use the bot*\n"
-            "Just send a link from X, Douyin, WeChat, RedNote, or Bilibili — you can send several "
+            "Just send a link from X, Douyin, WeChat, RedNote, Bilibili, or Alipay — you can send several "
             "links in one message and I'll download them one by one in order.\n\n"
             "▪️ X, RedNote and Bilibili links: you get quality options with sizes to choose from.\n"
-            "▪️ Douyin and WeChat links: downloaded automatically in the best available quality.\n"
+            "▪️ Douyin, WeChat and Alipay links: downloaded automatically in the best available quality.\n"
             "▪️ For any video you can download the audio only (MP3) with a separate button."
         ),
     },
@@ -400,6 +400,7 @@ DEFAULT_MESSAGES = {
     "platform_wechat": {"ar": "ويشات", "en": "WeChat"},
     "platform_rednote": {"ar": "RedNote", "en": "RedNote"},
     "platform_bilibili": {"ar": "Bilibili", "en": "Bilibili"},
+    "platform_alipay": {"ar": "Alipay", "en": "Alipay"},
     "post_unknown": {"ar": "غير معروف", "en": "Unknown"},
     "post_no_handle": {"ar": "بدون يوزر", "en": "no handle"},
     "post_no_desc": {"ar": "بدون وصف", "en": "no description"},
@@ -506,6 +507,35 @@ DEFAULT_MESSAGES = {
             "Buy downloads with Stars ⭐ and this video will download automatically after payment."
         ),
     },
+    # --- Alipay ---
+    "alipay_start": {
+        "ar": "🔗 رابط Alipay، جاري البدء...",
+        "en": "🔗 Alipay link detected, starting...",
+    },
+    "alipay_extracting": {
+        "ar": "🔍 جاري استخراج الفيديو من Alipay...",
+        "en": "🔍 Extracting the video from Alipay...",
+    },
+    "downloading_alipay": {
+        "ar": "⬇️ جاري تحميل الفيديو...",
+        "en": "⬇️ Downloading the video...",
+    },
+    "alipay_invalid_link": {
+        "ar": "رابط Alipay غير صالح او ما گدرت اقرأ الفيديو منه ❌\nتأكد انك نسخت رابط المشاركة كامل وجرب مرة ثانية.",
+        "en": "This Alipay link is invalid or the video couldn't be read from it ❌\nMake sure you copied the full share link and try again.",
+    },
+    "alipay_unavailable": {
+        "ar": "هذا الفيديو غير متوفر على Alipay (ممكن انحذف او الرابط انتهت صلاحيته) ❌",
+        "en": "This video is not available on Alipay (it may have been removed or the link expired) ❌",
+    },
+    "alipay_api_error": {
+        "ar": "صار خطأ بالاتصال بـ Alipay ❌\nجرب مرة ثانية، وإذا استمرت المشكلة اضغط الزر تحت للإبلاغ.",
+        "en": "There was an error talking to Alipay ❌\nTry again, and if it keeps happening tap the button below to report it.",
+    },
+    "alipay_download_failed": {
+        "ar": "فشل تحميل فيديو Alipay ❌\nجرب مرة ثانية، وإذا استمرت المشكلة اضغط الزر تحت للإبلاغ.",
+        "en": "Failed to download the Alipay video ❌\nTry again, and if it keeps happening tap the button below to report it.",
+    },
 }
 
 
@@ -535,6 +565,18 @@ LEGACY_MESSAGES = {
     "fallback_failed": {
         "ar": ["❌ فشلت المحاولة البديلة بعد.\n{error}"],
         "en": ["❌ The alternative method also failed.\n{error}"],
+    },
+    "welcome": {
+        "ar": ['هلا والف هلا بيك 👋\n\nارسلي رابط فيديو من X ( تويتر )، دويين ( التيك توك الصيني )، ويشات ( WeChat )، RedNote ( شياوخونغشو )، او Bilibili وراح أنزلك المحتوى.\n\n💠 روابط X، RedNote، وBilibili: راح تطلع الك خيارات جودة (مع الحجم) تختار منها.\n💠 روابط دويين وويشات: يتنزل تلقائياً بأعلى جودة متوفرة (فيديو او صور).\n\n📊 ارسل /stats حتى تشوف إحصائياتك وتتحكم بإعداداتك الشخصية (معلومات المنشور، التحقق من الرابط، المعاينة السريعة).'],
+        "en": ["Hey there 👋\n\nSend me a video link from X (Twitter), Douyin (Chinese TikTok), WeChat Channels, RedNote (Xiaohongshu), or Bilibili and I'll download it for you.\n\n💠 X, RedNote, and Bilibili links: you'll get quality options (with size) to choose from.\n💠 Douyin and WeChat links: downloaded automatically at the best available quality (video or photos).\n\n📊 Send /stats to see your stats and control your personal settings (post info, link verification, quick preview)."],
+    },
+    "help": {
+        "ar": ['📖 *الأوامر المتوفرة*\n\n/start — رسالة الترحيب وشرح المنصات المدعومة\n/stats — إحصائياتك الشخصية + رصيدك + إعداداتك\n/buy — شراء تحميلات بالنجوم ⭐\n/help — هذي الرسالة\n\n📎 *شلون تستخدم البوت*\nبس ارسل رابط من X، دويين، ويشات، RedNote، او Bilibili — تقدر ترسل عدة روابط بنفس الرسالة وراح انزلهن وحدة وحدة بالترتيب.\n\n▪️ روابط X، RedNote، وBilibili: تطلع الك خيارات جودة مع الحجم تختار منها.\n▪️ روابط دويين وويشات: تتنزل تلقائياً بأعلى جودة متوفرة.\n▪️ اي فيديو تكدر تحمل الصوت بس منه (MP3) بزر منفصل.'],
+        "en": ["📖 *Available commands*\n\n/start — Welcome message and supported platforms\n/stats — Your personal stats + balance + settings\n/buy — Buy downloads with Stars ⭐\n/help — This message\n\n📎 *How to use the bot*\nJust send a link from X, Douyin, WeChat, RedNote, or Bilibili — you can send several links in one message and I'll download them one by one in order.\n\n▪️ X, RedNote and Bilibili links: you get quality options with sizes to choose from.\n▪️ Douyin and WeChat links: downloaded automatically in the best available quality.\n▪️ For any video you can download the audio only (MP3) with a separate button."],
+    },
+    "unsupported_link": {
+        "ar": ['بس روابط X، دويين، ويشات، RedNote، او Bilibili مدعومة حالياً 🙏'],
+        "en": ['Only X, Douyin, WeChat, RedNote, or Bilibili links are supported right now 🙏'],
     },
 }
 
