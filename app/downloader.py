@@ -4,7 +4,7 @@ import uuid
 import asyncio
 import yt_dlp
 
-from . import config
+from . import config, alipay
 
 X_PATTERN = re.compile(r"(https?://)?(www\.)?(twitter\.com|x\.com)/\S+", re.IGNORECASE)
 DOUYIN_PATTERN = re.compile(r"(https?://)?(www\.|v\.)?(douyin\.com|iesdouyin\.com)/\S+", re.IGNORECASE)
@@ -15,7 +15,10 @@ BILIBILI_PATTERN = re.compile(
     r"(https?://)?(www\.)?(bilibili\.com|b23\.tv)/\S+", re.IGNORECASE
 )
 
+ALIPAY_PATTERN = alipay.ALIPAY_PATTERN
+
 _PATTERNS = {
+    "alipay": ALIPAY_PATTERN,
     "x": X_PATTERN,
     "douyin": DOUYIN_PATTERN,
     "rednote": REDNOTE_PATTERN,
@@ -210,9 +213,28 @@ async def get_direct_url(url: str, platform: str, height: int = 0) -> str | None
     return entry.get("url")
 
 
-async def download_video(url: str, platform: str, height: int = 0) -> tuple[list[str], dict]:
+async def _download_alipay(url: str, on_stage=None) -> tuple[list[str], dict]:
+    """Alipay: استخراج contentId + API ثم تنزيل الملف لنفس مجلد التحميل المؤقت.
+    on_stage(name) دالة async اختيارية ('extracting' / 'downloading') لتحديث رسالة الحالة."""
+    if on_stage:
+        await on_stage("extracting")
+    info = await asyncio.to_thread(alipay.fetch_info, url)
+    if on_stage:
+        await on_stage("downloading")
+    try:
+        files = await asyncio.to_thread(alipay.download, info)
+    except Exception:
+        alipay.invalidate(url)  # إعادة المحاولة تجيب رابط فيديو جديد بدل المخزن
+        raise
+    return files, info["meta"]
+
+
+async def download_video(url: str, platform: str, height: int = 0, on_stage=None) -> tuple[list[str], dict]:
     """يحمل كل فيديوهات/صور المنشور (وحدة او اكثر) بأقرب دقة ممكنة للدقة المختارة
     (height=0 يعني أفضل جودة متوفرة تلقائياً - مستخدم لكل المنصات غير X)."""
+    if platform == "alipay":
+        return await _download_alipay(url, on_stage)
+
     prefix = str(uuid.uuid4())
     out_template = os.path.join(config.DOWNLOAD_DIR, f"{prefix}_%(playlist_index)s.%(ext)s")
 
@@ -305,6 +327,12 @@ async def verify_link(url: str, platform: str) -> tuple[bool, str | None]:
     للمطور، كان يُبتلع سابقاً بدون أي تسجيل."""
 
     def _check():
+        if platform == "alipay":
+            try:
+                alipay.fetch_info(url)
+                return True, None
+            except Exception as e:
+                return False, str(e)
         opts = _base_opts()
         opts.update(_platform_opts(platform))
         try:
@@ -328,6 +356,16 @@ async def get_preview(url: str, platform: str) -> dict | None:
     """يجيب صورة مصغرة (thumbnail) ومدة الفيديو بدون تحميل فعلي، لعرض معاينة سريعة."""
 
     def _fetch():
+        if platform == "alipay":
+            try:
+                meta = alipay.fetch_info(url)["meta"]
+            except Exception:
+                return None
+            return {
+                "thumbnail": meta.get("thumbnail"),
+                "duration": meta.get("duration"),
+                "title": meta.get("description") or "",
+            }
         opts = _base_opts()
         opts.update(_platform_opts(platform))
         try:
