@@ -131,6 +131,14 @@ EDITABLE_MESSAGES = {
     "stats_no_downloads": "/stats: ما عنده تحميلات",
     "stats_balance_title": "/stats: عنوان الرصيد",
     "stats_balance_line": "/stats: سطر رصيد منصة",
+    # --- Alipay ---
+    "alipay_start": "Alipay: بدء التحميل",
+    "alipay_extracting": "Alipay: جاري استخراج الفيديو",
+    "downloading_alipay": "Alipay: جاري تحميل الفيديو",
+    "alipay_invalid_link": "Alipay: رابط غير صالح",
+    "alipay_unavailable": "Alipay: الفيديو غير متوفر",
+    "alipay_api_error": "Alipay: خطأ بالـ API",
+    "alipay_download_failed": "Alipay: فشل التحميل",
 }
 
 # شرح المتغيرات المتوفرة لكل رسالة قابلة للتعديل، يطلع للأدمن وقت التعديل
@@ -229,6 +237,8 @@ STICKER_LABELS = {
     "error_rednote": "ستيكر الخطأ - RedNote",
     "upload_bilibili": "ستيكر الرفع - Bilibili",
     "error_bilibili": "ستيكر الخطأ - Bilibili",
+    "upload_alipay": "ستيكر الرفع - Alipay",
+    "error_alipay": "ستيكر الخطأ - Alipay",
 }
 
 PLATFORM_LABELS = (
@@ -237,6 +247,7 @@ PLATFORM_LABELS = (
     ("wechat", "ويشات"),
     ("rednote", "RedNote (小红书)"),
     ("bilibili", "Bilibili"),
+    ("alipay", "Alipay"),
 )
 
 
@@ -1857,9 +1868,10 @@ async def _offer_paid_after_free_failure(context, chat_id: int, msg, user, url: 
     )
 
 
-async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1, lang: str = "ar", user=None):
-    """يعرض رسالة الخطأ مع زر إعادة المحاولة + زر الإبلاغ. يبلغ المطور تلقائياً بالخطأ الحقيقي."""
-    text = db.get_message("download_error", lang)
+async def _send_error_with_retry(context, chat_id: int, msg, error: str, url: str, platform: str, fail_count: int = 1, lang: str = "ar", user=None, error_key: str | None = None):
+    """يعرض رسالة الخطأ مع زر إعادة المحاولة + زر الإبلاغ. يبلغ المطور تلقائياً بالخطأ الحقيقي.
+    error_key: مفتاح رسالة خطأ خاص (مثلاً Alipay)، والا تنستخدم رسالة download_error العامة."""
+    text = db.get_message(error_key or "download_error", lang)
     report_id = await _report_error_to_dev(context, "تحميل فيديو", user, platform, url, error)
     if user is not None and _paid_offer_applies(platform):
         # دويين/RedNote: فشل المجاني يعرض الطريقة المدفوعة مباشرة (التقرير للقناة انرسل فوق)
@@ -2470,13 +2482,25 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     chat_id = update.effective_chat.id
     lang = _lang(update.effective_user.id)
     status_key = "downloading_douyin" if platform == "douyin" else "downloading"
+    if platform == "alipay":
+        status_key = "alipay_start"
     msg = await update.message.reply_text(db.get_message(status_key, lang))
     await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
 
     files = []
     took_heavy_slot = False
     try:
-        files, meta = await downloader.download_video(url, platform, 0)
+        if platform == "alipay":
+            async def _alipay_stage(stage: str):
+                # تحديث رسالة الحالة (استخراج -> تحميل)، فشل التعديل ما يوقف التحميل
+                key = "alipay_extracting" if stage == "extracting" else "downloading_alipay"
+                try:
+                    await msg.edit_text(db.get_message(key, lang))
+                except Exception:
+                    pass
+            files, meta = await downloader.download_video(url, platform, 0, on_stage=_alipay_stage)
+        else:
+            files, meta = await downloader.download_video(url, platform, 0)
         if not files:
             no_files_msg = db.get_message("no_files", lang)
             await _send_error_with_retry(
@@ -2512,11 +2536,15 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
             raise
         await _resolve_upload_sticker_success(sticker_msg)
 
-        req_id = uuid.uuid4().hex[:10]
-        PENDING[f"audio_{platform}_{req_id}"] = url
-        audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
-            db.get_message("btn_audio", lang), callback_data=f"aud:{platform}:{req_id}"
-        )]])
+        if platform == "alipay":
+            # Alipay ما يدعم تحميل الصوت المنفصل (yt-dlp ما يتعامل مع رابطه) - نخفي الزر
+            audio_btn = None
+        else:
+            req_id = uuid.uuid4().hex[:10]
+            PENDING[f"audio_{platform}_{req_id}"] = url
+            audio_btn = InlineKeyboardMarkup([[InlineKeyboardButton(
+                db.get_message("btn_audio", lang), callback_data=f"aud:{platform}:{req_id}"
+            )]])
         _maybe_trigger_size_limit(update.effective_user.id, _total_size(files))
         _record_download_success(platform)
         if fail_count == 0:
@@ -2528,7 +2556,10 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
-        await _send_error_with_retry(context, chat_id, msg, str(e), url, platform, fail_count + 1, lang, update.effective_user)
+        await _send_error_with_retry(
+            context, chat_id, msg, str(e), url, platform, fail_count + 1, lang, update.effective_user,
+            error_key=getattr(e, "message_key", None),
+        )
         if fail_count == 0:
             await _set_link_reaction(context, update.message, "failure")
     finally:
