@@ -8,7 +8,7 @@ import logging
 import traceback
 import yt_dlp
 
-from . import config, alipay
+from . import config, alipay, douyin_web
 
 X_PATTERN = re.compile(r"(https?://)?(www\.)?(twitter\.com|x\.com)/\S+", re.IGNORECASE)
 DOUYIN_PATTERN = re.compile(r"(https?://)?(www\.|v\.)?(douyin\.com|iesdouyin\.com)/\S+", re.IGNORECASE)
@@ -393,10 +393,24 @@ async def download_video(url: str, platform: str, height: int = 0, on_stage=None
 
     try:
         files, meta = await asyncio.to_thread(_download)
-    except Exception:
+    except Exception as yt_error:
         _douyin_debug_fail("download", platform, url)
         cleanup_by_prefix(prefix)  # ننظف اي ملفات جزئية/مؤقتة تركها الفشل (خصوصاً اثناء الدمج)
-        raise
+
+        # Douyin's current web-detail API can return an empty response even with valid
+        # cookies. Try the lightweight rendered-web parser before exposing the existing
+        # paid TikHub fallback. This path uses requests only (no Chromium/Playwright),
+        # so it stays suitable for Render Free.
+        if platform == "douyin":
+            try:
+                web_files, web_meta = await asyncio.to_thread(douyin_web.download, url)
+                return _fix_extensions(web_files), web_meta
+            except Exception as web_error:
+                logging.getLogger("douyin_web").warning(
+                    "Douyin web fallback failed; keeping original yt-dlp error: %s", web_error
+                )
+
+        raise yt_error
     return _fix_extensions(files), meta
 
 
@@ -487,6 +501,16 @@ async def verify_link(url: str, platform: str) -> tuple[bool, str | None]:
     # محاولة ثانية بعد مهلة قصيرة - تتجنب الحكم بالفشل بسبب تذبذب لحظي
     await asyncio.sleep(2)
     ok2, error2 = await asyncio.to_thread(_check)
+
+    # دويين: اذا yt-dlp فشل (مثلاً "Fresh cookies are needed") لا نوقف هنا - نجرب محلل صفحة الويب
+    # المجاني (نفس الطريقة اللي يستخدمها التحميل)، حتى الرابط يوصل لمرحلة التحميل والـ Web Fallback.
+    if not ok2 and platform == "douyin":
+        try:
+            await asyncio.to_thread(douyin_web.verify, url)
+            return True, None
+        except Exception as web_error:
+            return False, f"{error2 or error}\n[Douyin web parser verification also failed: {web_error}]"
+
     return ok2, (error2 or error) if not ok2 else None
 
 
