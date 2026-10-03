@@ -1,7 +1,11 @@
 import os
 import re
+import sys
+import time
 import uuid
 import asyncio
+import logging
+import traceback
 import yt_dlp
 
 from . import config, alipay
@@ -90,6 +94,134 @@ def _platform_opts(platform: str) -> dict:
             "Origin": "https://www.bilibili.com",
         }
     return opts
+
+
+# ==================== DEBUG مؤقت: مشكلة دويين / yt-dlp ====================
+# يطبع تشخيص آمن بـ Render Logs (بس لما platform == "douyin") بدون أي تغيير بمنطق التحميل.
+# ما يطبع أبداً: قيم الكوكيز، اسماء الكوكيز، توكن البوت، مفاتيح API، اي headers حساسة.
+# بعد معرفة السبب احذف هذا القسم + الاسطر اللي تبدأ بـ _douyin_debug_ بالدوال تحت.
+_dbg_logger = logging.getLogger("douyin_debug")
+_DBG = "[DOUYIN-DEBUG]"
+_DBG_SAFE_OPT_KEYS = (
+    "cookiefile", "cookiesfrombrowser", "format", "socket_timeout", "retries",
+    "noplaylist", "nocheckcertificate", "merge_output_format",
+)
+
+
+def _douyin_debug_scrub(text: str) -> str:
+    """حماية اضافية: يخفي اي سر معروف للبوت لو ظهر بالغلط بنص الخطأ."""
+    for name in ("BOT_TOKEN", "TIKHUB_API_KEY", "MONGO_URI"):
+        secret = getattr(config, name, "") or ""
+        if len(secret) >= 8:
+            text = text.replace(secret, "***")
+    return text
+
+
+def _douyin_debug_cookie_file(path) -> str:
+    """وصف هيكلي لملف الكوكيز (أرقام وحالات بس - ما يطبع محتوى ولا اسماء ولا قيم)."""
+    if not path:
+        return "cookiefile=None (yt-dlp will run WITHOUT cookies)"
+    if not os.path.isfile(path):
+        return f"cookiefile path={path} exists=False"
+    size = os.path.getsize(path)
+    header_ok = False
+    rows = douyin_rows = expired = session = bad_rows = 0
+    now = int(time.time())
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for i, raw in enumerate(f):
+            line = raw.rstrip("\r\n")
+            if i == 0:
+                header_ok = re.match(r"#( Netscape)? HTTP Cookie File", line) is not None
+            if line.startswith("#HttpOnly_"):
+                line = line[len("#HttpOnly_"):]
+            elif not line.strip() or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 7:
+                bad_rows += 1
+                continue
+            rows += 1
+            if "douyin" in parts[0].lower():
+                douyin_rows += 1
+            try:
+                exp = int(parts[4])
+            except ValueError:
+                bad_rows += 1
+                continue
+            if exp == 0:
+                session += 1
+            elif exp < now:
+                expired += 1
+    return (
+        f"cookiefile path={path} exists=True size_bytes={size} "
+        f"netscape_header_ok={header_ok} cookie_rows={rows} douyin_domain_rows={douyin_rows} "
+        f"expired_rows={expired} session_rows={session} malformed_rows={bad_rows}"
+    )
+
+
+def _douyin_debug_start(stage: str, platform: str, url: str, opts: dict):
+    """يطبع حالة yt-dlp/الكوكيز/الخيارات قبل لا يبدأ الاستخراج. ما يرفع اي خطأ ابداً."""
+    if platform != "douyin":
+        return
+    try:
+        try:
+            from yt_dlp.version import __version__ as ytdlp_version
+        except Exception:
+            ytdlp_version = "unknown"
+        try:
+            from yt_dlp.version import CHANNEL as ytdlp_channel
+        except Exception:
+            ytdlp_channel = "unknown"
+        try:
+            from yt_dlp.utils.networking import std_headers
+        except Exception:
+            from yt_dlp.utils import std_headers
+        headers = {**std_headers, **(opts.get("http_headers") or {})}
+        safe_opts = {k: opts.get(k) for k in _DBG_SAFE_OPT_KEYS if k in opts}
+        safe_opts["proxy_set"] = bool(opts.get("proxy"))
+        safe_opts["http_headers_override_names"] = sorted((opts.get("http_headers") or {}).keys())
+        env_data = getattr(config, "DOUYIN_COOKIES_DATA", "") or ""
+        lines = [
+            f"{_DBG} stage={stage} yt-dlp starting extraction url={url}",
+            f"{_DBG} yt-dlp version={ytdlp_version} channel={ytdlp_channel} python={sys.version.split()[0]}",
+            f"{_DBG} env DOUYIN_COOKIES_DATA set={bool(env_data)} length_chars={len(env_data)} "
+            f"config.DOUYIN_COOKIES_FILE={'None' if config.DOUYIN_COOKIES_FILE is None else config.DOUYIN_COOKIES_FILE}",
+            f"{_DBG} {_douyin_debug_cookie_file(opts.get('cookiefile'))}",
+            f"{_DBG} yt-dlp safe options={safe_opts}",
+            f"{_DBG} user-agent={headers.get('User-Agent')}",
+            f"{_DBG} proxy env set: HTTP_PROXY={bool(os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy'))} "
+            f"HTTPS_PROXY={bool(os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy'))}",
+        ]
+        _dbg_logger.info(_douyin_debug_scrub("\n".join(lines)))
+    except Exception as dbg_err:  # التشخيص ما لازم يكسر التحميل ابداً
+        try:
+            _dbg_logger.info("%s start-diagnostics failed: %r", _DBG, dbg_err)
+        except Exception:
+            pass
+
+
+def _douyin_debug_fail(stage: str, platform: str, url: str):
+    """يُستدعى داخل except: يطبع الخطأ الكامل مع traceback (واذا yt-dlp غلّف الخطأ يطبع الأصلي بعد).
+    ما يرفع اي خطأ ابداً."""
+    if platform != "douyin":
+        return
+    try:
+        exc = sys.exc_info()[1]
+        parts = [
+            f"{_DBG} stage={stage} FAILED url={url}",
+            f"{_DBG} exception type={type(exc).__module__}.{type(exc).__name__}",
+            f"{_DBG} exception message={exc}",
+            f"{_DBG} full traceback:\n{traceback.format_exc()}",
+        ]
+        inner = getattr(exc, "exc_info", None)  # yt-dlp DownloadError يحمل الخطأ الأصلي هنا
+        if inner and len(inner) == 3 and inner[1] is not None and inner[1] is not exc:
+            parts.append(
+                f"{_DBG} inner (original yt-dlp) traceback:\n"
+                + "".join(traceback.format_exception(*inner))
+            )
+        _dbg_logger.error(_douyin_debug_scrub("\n".join(parts)))
+    except Exception:
+        pass
 
 
 def _entries_of(info: dict) -> list[dict]:
@@ -251,6 +383,7 @@ async def download_video(url: str, platform: str, height: int = 0, on_stage=None
             "writethumbnail": False,
         })
         opts.update(_platform_opts(platform))
+        _douyin_debug_start("download", platform, url, opts)
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             entries = _entries_of(info)
@@ -261,6 +394,7 @@ async def download_video(url: str, platform: str, height: int = 0, on_stage=None
     try:
         files, meta = await asyncio.to_thread(_download)
     except Exception:
+        _douyin_debug_fail("download", platform, url)
         cleanup_by_prefix(prefix)  # ننظف اي ملفات جزئية/مؤقتة تركها الفشل (خصوصاً اثناء الدمج)
         raise
     return _fix_extensions(files), meta
@@ -292,6 +426,7 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
             }],
         })
         opts.update(_platform_opts(platform))
+        _douyin_debug_start("audio", platform, url, opts)
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             entries = _entries_of(info)
@@ -307,6 +442,7 @@ async def download_audio(url: str, platform: str) -> tuple[list[str], dict]:
     try:
         files, meta = await asyncio.to_thread(_download)
     except Exception:
+        _douyin_debug_fail("audio", platform, url)
         cleanup_by_prefix(prefix)
         raise
     files = [f for f in files if os.path.exists(f)]
@@ -335,11 +471,13 @@ async def verify_link(url: str, platform: str) -> tuple[bool, str | None]:
                 return False, str(e)
         opts = _base_opts()
         opts.update(_platform_opts(platform))
+        _douyin_debug_start("verify", platform, url, opts)
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=False)
             return True, None
         except Exception as e:
+            _douyin_debug_fail("verify", platform, url)
             return False, str(e)
 
     ok, error = await asyncio.to_thread(_check)
@@ -368,10 +506,12 @@ async def get_preview(url: str, platform: str) -> dict | None:
             }
         opts = _base_opts()
         opts.update(_platform_opts(platform))
+        _douyin_debug_start("preview", platform, url, opts)
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception:
+            _douyin_debug_fail("preview", platform, url)
             return None
         entries = _entries_of(info)
         entry = entries[0]
