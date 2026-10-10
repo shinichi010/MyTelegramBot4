@@ -512,6 +512,16 @@ DEFAULT_MESSAGES = {
         "ar": "🔗 رابط Alipay، جاري البدء...",
         "en": "🔗 Alipay link detected, starting...",
     },
+    "alipay_slow_wait": {
+        "ar": (
+            "⏳ الرابط يحتاج وقت اطول من المعتاد شوي.\n"
+            "لا تعيد إرسال الرابط خل البوت يكمل المعالجة واذا نجحت العملية رح يرسل المقطع تلقائياً 💃."
+        ),
+        "en": (
+            "⏳ This link is taking a little longer than usual.\n"
+            "Please don't resend it, let the bot finish processing and it will send the video automatically if it succeeds 💃."
+        ),
+    },
     "alipay_extracting": {
         "ar": "🔍 جاري استخراج الفيديو من Alipay...",
         "en": "🔍 Extracting the video from Alipay...",
@@ -577,6 +587,10 @@ LEGACY_MESSAGES = {
     "unsupported_link": {
         "ar": ['بس روابط X، دويين، ويشات، RedNote، او Bilibili مدعومة حالياً 🙏'],
         "en": ['Only X, Douyin, WeChat, RedNote, or Bilibili links are supported right now 🙏'],
+    },
+    "alipay_slow_wait": {
+        "ar": ["⏳ الرابط يحتاج وقت أطول من المعتاد شوي.\n\nلا تعيد إرسال الرابط؛ خلّ البوت يكمل المعالجة، وإذا نجحت العملية راح يرسل المقطع تلقائياً."],
+        "en": ["⏳ This link is taking a little longer than usual.\n\nPlease don't resend it. Let the bot finish processing, and it will send the video automatically if successful."],
     },
 }
 
