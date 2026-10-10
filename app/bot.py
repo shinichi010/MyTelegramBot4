@@ -133,6 +133,7 @@ EDITABLE_MESSAGES = {
     "stats_balance_line": "/stats: سطر رصيد منصة",
     # --- Alipay ---
     "alipay_start": "Alipay: بدء التحميل",
+    "alipay_slow_wait": "Alipay: رسالة توضيح عند التأخير",
     "alipay_extracting": "Alipay: جاري استخراج الفيديو",
     "downloading_alipay": "Alipay: جاري تحميل الفيديو",
     "alipay_invalid_link": "Alipay: رابط غير صالح",
@@ -1718,6 +1719,24 @@ def _extract_all_links(text: str) -> list[tuple[str, str]]:
     return results
 
 
+async def _edit_status_if_slow(message, lang: str, delay: int = 12):
+    """بعد تأخير ملحوظ، يوضح للمستخدم أن معالجة رابط Alipay ما زالت مستمرة."""
+    await asyncio.sleep(delay)
+    try:
+        await message.edit_text(db.get_message("alipay_slow_wait", lang))
+    except Exception:
+        # الرسالة ممكن تكون انحذفت أو تغيّرت؛ لا نخلي إشعار الحالة يعطّل التحميل.
+        pass
+
+
+async def _cancel_status_timer(task):
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
 async def _process_single_link(update, context, user, platform: str, url: str, fail_count: int = 0):
     lang = _lang(user.id)
     if platform == "wechat":
@@ -1741,7 +1760,14 @@ async def _process_single_link(update, context, user, platform: str, url: str, f
 
     if _verify_link_enabled(user.id):
         check_msg = await update.message.reply_text(db.get_message("verifying_link", lang))
-        ok, verify_error = await downloader.verify_link(url, platform)
+        verify_slow_task = (
+            asyncio.create_task(_edit_status_if_slow(check_msg, lang))
+            if platform == "alipay" else None
+        )
+        try:
+            ok, verify_error = await downloader.verify_link(url, platform)
+        finally:
+            await _cancel_status_timer(verify_slow_task)
         await check_msg.delete()
         if not ok:
             report_id = await _report_error_to_dev(context, "التحقق من الرابط", user, platform, url, verify_error or "unknown verification failure")
@@ -2485,6 +2511,10 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
     if platform == "alipay":
         status_key = "alipay_start"
     msg = await update.message.reply_text(db.get_message(status_key, lang))
+    slow_status_task = (
+        asyncio.create_task(_edit_status_if_slow(msg, lang))
+        if platform == "alipay" else None
+    )
     await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_VIDEO)
 
     files = []
@@ -2501,6 +2531,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
             files, meta = await downloader.download_video(url, platform, 0, on_stage=_alipay_stage)
         else:
             files, meta = await downloader.download_video(url, platform, 0)
+        await _cancel_status_timer(slow_status_task)  # لا نكتب فوق رسائل الحالة النهائية (حجم كبير / لا ملفات)
         if not files:
             no_files_msg = db.get_message("no_files", lang)
             await _send_error_with_retry(
@@ -2554,6 +2585,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception:
             logger.exception("failed to send post info after successful auto-download (ignored)")
     except Exception as e:
+        await _cancel_status_timer(slow_status_task)  # لا نكتب فوق رسالة الخطأ وأزرارها
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
         await _send_error_with_retry(
@@ -2563,6 +2595,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
         if fail_count == 0:
             await _set_link_reaction(context, update.message, "failure")
     finally:
+        await _cancel_status_timer(slow_status_task)
         downloader.cleanup(files)
         if took_heavy_slot:
             _release_heavy_slot()
