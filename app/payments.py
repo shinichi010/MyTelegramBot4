@@ -265,7 +265,10 @@ NOTIFY_KINDS = {
     "tikhub": "⚠️ رصيد TikHub المنخفض",
     "failure": "🚨 تنبيه فشل متتالي بمنصة",
     "errors": "🐛 تقارير الأخطاء (تلقائي)",
+    "success": "✅ إشعار نجاح التحميل",
 }
+# أنواع يقدر الأدمن يوقفها كلياً بزر من /admin (الباقي ما ينوقف حتى ما تضيع تنبيهات مهمة).
+NOTIFY_OPTIONAL = ("success",)
 # الافتراضي: القناة لو مضبوطة، وإلا الخاص (حتى ما تضيع إشعارات لو ما ضبطت القناة)
 _DEFAULT_ROUTE = "channel"
 
@@ -283,8 +286,22 @@ def set_route(kind: str, route: str):
         db.set_setting(f"notify_route_{kind}", route)
 
 
+def is_enabled(kind: str) -> bool:
+    """النوع شغّال؟ (فقط الأنواع بـ NOTIFY_OPTIONAL تقدر تنوقف، الباقي دائماً شغّال)."""
+    if kind not in NOTIFY_OPTIONAL:
+        return True
+    return bool(db.get_setting(f"notify_enabled_{kind}", True))
+
+
+def set_enabled(kind: str, enabled: bool):
+    if kind in NOTIFY_OPTIONAL:
+        db.set_setting(f"notify_enabled_{kind}", bool(enabled))
+
+
 def target_for(kind: str):
-    """الآيدي اللي تنرسل له إشعارات هذا النوع."""
+    """الآيدي اللي تنرسل له إشعارات هذا النوع (None اذا النوع موقوف)."""
+    if not is_enabled(kind):
+        return None
     return config.NOTIFY_CHANNEL_ID if get_route(kind) == "channel" else config.ADMIN_CHAT_ID
 
 
