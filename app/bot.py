@@ -486,6 +486,35 @@ async def _report_error_to_dev(context, kind: str, user_id, platform: str, url: 
     return report_id
 
 
+async def _report_success_to_dev(context, kind: str, user, platform: str, url: str, method: str, files: list):
+    """إشعار نجاح لقناة/خاص المطور (نوع 'success') بنفس شكل تقرير الخطأ.
+    يُستدعى بعد نجاح الرفع الفعلي فقط. ما يرفع اي خطأ ابداً: لو فشل الإرسال او النوع موقوف
+    ينتجاهل بدون ما يأثر على المستخدم او الإحصائيات او الخصم."""
+    try:
+        if not payments.target_for("success"):
+            return
+        if hasattr(user, "id"):
+            username = f"@{user.username}" if getattr(user, "username", None) else "—"
+            user_id = user.id
+        else:
+            user_id, username = user, "—"
+        size_mb = _total_size(files) / (1024 * 1024)
+        text = db.get_message(
+            "dev_success_report", "ar",
+            kind=_md_escape(kind),
+            user_id=user_id if user_id is not None else "—",
+            username=_md_escape(username),
+            platform=_md_escape(platform or "—"),
+            url=_md_escape(url or "—"),
+            method=_md_escape(method),
+            files=len(files),
+            size=f"{size_mb:.1f}",
+        )
+        await _send_dev_report(context, "success", text)
+    except Exception:
+        logger.exception("failed to send success report (ignored)")
+
+
 def _report_button(report_id: str, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(
         db.get_message("btn_report_problem", lang), callback_data=f"report:{report_id}"
@@ -2152,6 +2181,7 @@ async def _run_fallback_download(update, context, user, chat_id: int, url: str, 
             await _send_post_info(context, chat_id, user.id, meta, len(files))
         except Exception:
             logger.exception("failed to send post info after successful fallback upload (ignored)")
+        await _report_success_to_dev(context, "المحاولة البديلة", user, platform, url, "بديلة مدفوعة (TikHub) 💰", files)
 
         await _maybe_low_balance_hint(context, chat_id, user, platform)
         try:
@@ -2584,6 +2614,7 @@ async def _handle_auto_download(update: Update, context: ContextTypes.DEFAULT_TY
             await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files), reply_markup=audio_btn)
         except Exception:
             logger.exception("failed to send post info after successful auto-download (ignored)")
+        await _report_success_to_dev(context, "تحميل فيديو", update.effective_user, platform, url, "مجاني", files)
     except Exception as e:
         await _cancel_status_timer(slow_status_task)  # لا نكتب فوق رسالة الخطأ وأزرارها
         logger.exception(f"{platform} download failed")
@@ -2736,6 +2767,10 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
             await _send_post_info(context, chat_id, update.effective_user.id, meta, len(files))
         except Exception:
             logger.exception("failed to send post info after successful upload (ignored)")
+        await _report_success_to_dev(
+            context, "تحميل صوت (MP3)" if is_audio else "تحميل فيديو",
+            query.from_user, platform, url, "مجاني", files,
+        )
     except Exception as e:
         logger.exception(f"{platform} download failed")
         await _record_download_failure(context, platform, str(e))
@@ -2795,6 +2830,7 @@ async def handle_audio_request(update: Update, context: ContextTypes.DEFAULT_TYP
         for path in files:
             await _send_file(update, context, path, chat_id=chat_id, display_name=display_name)
         _maybe_trigger_size_limit(query.from_user.id, _total_size(files))
+        await _report_success_to_dev(context, "تحميل صوت (MP3)", update.effective_user, platform, url, "مجاني", files)
     except Exception as e:
         logger.exception("audio download failed")
         report_id = await _report_error_to_dev(context, "تحميل صوت (MP3)", update.effective_user, platform, url, str(e))
