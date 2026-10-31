@@ -45,6 +45,7 @@ def _notify_text() -> str:
         f"الخاص: `{config.ADMIN_CHAT_ID or '—'}`",
         "",
         "اضغط على أي نوع حتى تبدل وجهته بين 📢 القناة و 👤 الخاص:",
+        "الأنواع اللي تحتها زر 🟢/🔴 تقدر تشغلها او توقفها كلياً.",
     ]
     return "\n".join(lines)
 
@@ -54,6 +55,12 @@ def _notify_markup() -> Markup:
     for kind, label in payments.NOTIFY_KINDS.items():
         dest = "📢 القناة" if payments.get_route(kind) == "channel" else "👤 الخاص"
         rows.append([Btn(f"{label}: {dest}", callback_data=f"adm:w:route:{kind}")])
+        if kind in payments.NOTIFY_OPTIONAL:
+            on = payments.is_enabled(kind)
+            rows.append([Btn(
+                f"{'🟢 شغّال' if on else '🔴 موقوف'} — اضغط لـ {'الإيقاف' if on else 'التشغيل'}",
+                callback_data=f"adm:w:toggle:{kind}",
+            )])
     rows.append([Btn("📨 إرسال رسالة تجريبية", callback_data="adm:w:notify_test")])
     rows.append(_back())
     return Markup(rows)
@@ -209,10 +216,19 @@ async def handle_wallet_callback(update: Update, context: ContextTypes.DEFAULT_T
                 payments.set_route(kind, "private" if current == "channel" else "channel")
         await query.edit_message_text(_notify_text(), parse_mode="Markdown", reply_markup=_notify_markup())
 
+    elif action.startswith("toggle:"):
+        kind = action.split(":", 1)[1]
+        if kind in payments.NOTIFY_OPTIONAL:
+            payments.set_enabled(kind, not payments.is_enabled(kind))
+        await query.edit_message_text(_notify_text(), parse_mode="Markdown", reply_markup=_notify_markup())
+
     elif action == "notify_test":
         lines = []
         seen = {}
         for kind, label in payments.NOTIFY_KINDS.items():
+            if not payments.is_enabled(kind):
+                lines.append(f"• {label}: 🔴 موقوف")
+                continue
             tgt = payments.target_for(kind)
             if tgt in seen:
                 lines.append(f"• {label}: {seen[tgt]}")
