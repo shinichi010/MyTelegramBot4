@@ -421,6 +421,24 @@ DEFAULT_MESSAGES = {
             "❗️ *Error:*\n`{error}`"
         ),
     },
+    "dev_success_report": {
+        "ar": (
+            "✅ *تم التنزيل - {kind}*\n\n"
+            "👤 المستخدم: `{user_id}` {username}\n"
+            "🌐 المنصة: {platform}\n"
+            "🔗 الرابط: {url}\n\n"
+            "📦 الطريقة: {method}\n"
+            "🎞️ الملفات: {files} • الحجم: {size} MB"
+        ),
+        "en": (
+            "✅ *Downloaded - {kind}*\n\n"
+            "👤 User: `{user_id}` {username}\n"
+            "🌐 Platform: {platform}\n"
+            "🔗 URL: {url}\n\n"
+            "📦 Method: {method}\n"
+            "🎞️ Files: {files} • Size: {size} MB"
+        ),
+    },
     "btn_report_problem": {"ar": "🚨 أبلغ عن المشكلة", "en": "🚨 Report the problem"},
     "btn_seen": {"ar": "✅ شفتها", "en": "✅ Seen"},
     "report_ask": {
