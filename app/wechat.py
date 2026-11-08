@@ -32,6 +32,12 @@ DECRYPT_ATTEMPTS = 3
 DECRYPT_TIMEOUT = 90          # ثانية لكل محاولة (الاستيقاظ يأخذ وقت)
 DECRYPT_BACKOFF_SEC = 8       # انتظار 8 ثم 16 ثانية بين المحاولات
 
+# إعادة محاولة تنزيل الفيديو المشفر من سيرفر ويشات (wxapp.tc.qq.com): بطيء ويقطع الاتصال أحياناً
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_CONNECT_TIMEOUT = 20
+DOWNLOAD_READ_TIMEOUT = 90    # ثانية بين أي دفعتين بيانات (كانت 60)
+DOWNLOAD_BACKOFF_SEC = 3      # انتظار 3 ثم 6 ثواني بين المحاولات
+
 
 def detect(text: str) -> bool:
     return bool(WECHAT_PATTERN.search(text))
@@ -87,6 +93,61 @@ def _extract_media(detail: dict) -> dict:
     }
 
 
+class _IncompleteDownload(Exception):
+    """الملف المشفر وصل فاضي او ناقص (مؤقت، يستحق إعادة المحاولة)."""
+
+
+def _remove_quietly(path: str):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _is_temporary_download_error(e: Exception) -> bool:
+    """أخطاء مؤقتة تستاهل إعادة المحاولة بنفس الرابط: انقطاع/مهلة/تقطيع، او HTTP 5xx/408/429.
+    4xx الباقي (403/404...) = الرابط نفسه مرفوض/منتهي، اعادة المحاولة ما تفيد."""
+    if isinstance(e, requests.HTTPError):
+        code = getattr(e.response, "status_code", 0) or 0
+        return code >= 500 or code in (408, 429)
+    return isinstance(e, (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError,
+                          _IncompleteDownload))
+
+
+def _download_encrypted(url: str, dest: str):
+    """ينزل الفيديو المشفر لـ dest مع إعادة محاولة محدودة للأخطاء المؤقتة. كل محاولة تبدأ من الصفر
+    (الملف الجزئي ينحذف) حتى ما يتلخبط المحتوى، وعند الفشل النهائي ما يبقى ملف جزئي بالقرص."""
+    last_err = None
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            with requests.get(url, stream=True, timeout=(DOWNLOAD_CONNECT_TIMEOUT, DOWNLOAD_READ_TIMEOUT)) as r:
+                r.raise_for_status()
+                try:
+                    expected = int(r.headers.get("Content-Length") or 0)
+                except ValueError:
+                    expected = 0
+                written = 0
+                with open(dest, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 256):
+                        if chunk:
+                            f.write(chunk)
+                            written += len(chunk)
+            if written == 0:
+                raise _IncompleteDownload("سيرفر ويشات رجع ملف فاضي")
+            if expected and written < expected:
+                raise _IncompleteDownload(f"التنزيل ناقص ({written} من {expected} بايت)")
+            return
+        except Exception as e:
+            last_err = e
+            _remove_quietly(dest)
+            if not _is_temporary_download_error(e):
+                raise
+            logger.warning("wechat download attempt %s/%s failed: %s", attempt, DOWNLOAD_ATTEMPTS, e)
+            if attempt < DOWNLOAD_ATTEMPTS:
+                time.sleep(DOWNLOAD_BACKOFF_SEC * attempt)
+    raise RuntimeError(f"فشل تنزيل فيديو ويشات بعد {DOWNLOAD_ATTEMPTS} محاولات: {last_err}") from last_err
+
+
 def download_and_decrypt(share_url: str) -> tuple[str, dict]:
     """
     يسوي الدورة الكاملة: يجيب تفاصيل الفيديو من TikHub، ينزل النسخة المشفرة،
@@ -100,11 +161,7 @@ def download_and_decrypt(share_url: str) -> tuple[str, dict]:
 
     # تنزيل الفيديو المشفر
     encrypted_path = os.path.join(config.DOWNLOAD_DIR, f"{uuid.uuid4()}_wx_encrypted.mp4")
-    with requests.get(media["download_url"], stream=True, timeout=60) as r:
-        r.raise_for_status()
-        with open(encrypted_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 256):
-                f.write(chunk)
+    _download_encrypted(media["download_url"], encrypted_path)
 
     # إرسال الملف المشفر لخدمة فك التشفير.
     # خدمة Render المجانية تنام بعد ~15 دقيقة، فأول طلب غالباً يفشل/يتأخر (استيقاظ).
